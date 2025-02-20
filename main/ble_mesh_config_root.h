@@ -9,6 +9,8 @@
 #include "esp_ble_mesh_networking_api.h"
 #include "esp_ble_mesh_config_model_api.h"
 #include "esp_ble_mesh_rpr_model_api.h"
+#include <esp_ble_mesh_df_model_api.h>
+#include "esp_ble_mesh_local_data_operation_api.h"
 
 
 #include "mesh/adapter.h"

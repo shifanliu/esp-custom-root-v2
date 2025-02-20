@@ -6,9 +6,7 @@
 
 #include "board.h"
 #include "ble_mesh_config_root.h"
-#include <esp_ble_mesh_df_model_api.h>
 #include "../Secret/NetworkConfig.h"
-#include "esp_ble_mesh_local_data_operation_api.h"
 
 #define TAG TAG_ROOT
 #define TAG_W "Debug"
@@ -396,6 +394,44 @@ void example_ble_mesh_send_remote_provisioning_scan_start(void)
     cur_rpr_cli_opcode = ESP_BLE_MESH_MODEL_OP_RPR_SCAN_GET;
 }
 
+void example_ble_mesh_send_directed_forwarding_srv_control_set(esp_ble_mesh_node_info_t *node)
+{
+    esp_ble_mesh_df_client_set_t set = {0};
+    esp_ble_mesh_client_common_param_t param = {0};
+    esp_ble_mesh_elem_t *element = NULL;
+    esp_ble_mesh_model_t *model = NULL;
+    esp_err_t err = ESP_OK;
+
+    element = esp_ble_mesh_find_element(esp_ble_mesh_get_primary_element_address());
+    if (!element) {
+        ESP_LOGE(TAG, "Element 0x%04x not exists", esp_ble_mesh_get_primary_element_address());
+        return;
+    }
+
+    model = esp_ble_mesh_find_sig_model(element, ESP_BLE_MESH_MODEL_ID_DF_CLI);
+    if (!model) {
+        ESP_LOGE(TAG, "Directed Forwarding Client not exists");
+        return;
+    }
+
+    ble_mesh_set_msg_common(&param, node->unicast, model, ESP_BLE_MESH_MODEL_OP_DIRECTED_CONTROL_SET);
+
+    set.directed_control_set.net_idx = ble_mesh_key.net_idx;
+    set.directed_control_set.directed_forwarding = ESP_BLE_MESH_DIRECTED_FORWARDING_ENABLED;
+    set.directed_control_set.directed_relay = ESP_BLE_MESH_DIRECTED_RELAY_ENABLED;
+    set.directed_control_set.directed_proxy = ESP_BLE_MESH_DIRECTED_PROXY_IGNORE;
+    set.directed_control_set.directed_proxy_use_default = ESP_BLE_MESH_DIRECTED_PROXY_USE_DEFAULT_IGNORE;
+    set.directed_control_set.directed_friend = ESP_BLE_MESH_DIRECTED_FRIEND_IGNORE;
+
+
+    err = esp_ble_mesh_df_client_set_state(&param, &set);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to send Directed Forwarding Control Set");
+    }
+
+    return;
+}
+
 static esp_err_t prov_complete(uint16_t node_index, const esp_ble_mesh_octet16_t uuid, uint16_t primary_addr, uint8_t element_num, uint16_t net_idx)
 {
     // Root Module only, intiate configuration of edge node
@@ -439,6 +475,8 @@ static esp_err_t prov_complete(uint16_t node_index, const esp_ble_mesh_octet16_t
         return ESP_FAIL;
     }
 
+    example_ble_mesh_send_directed_forwarding_srv_control_set(&nodes[node_index]);
+
     // application level callback, let main() know provision is completed
     prov_complete_handler_cb(node_index, uuid, primary_addr, element_num, net_idx);  //==================== app level callback
 
@@ -475,51 +513,14 @@ static void recv_unprov_adv_pkt(uint8_t dev_uuid[ESP_BLE_MESH_OCTET16_LEN], uint
     }
 }
 
-void example_ble_mesh_send_directed_forwarding_srv_control_set(esp_ble_mesh_node_info_t *node)
-{
-    esp_ble_mesh_df_client_set_t set = {0};
-    esp_ble_mesh_client_common_param_t param = {0};
-    esp_ble_mesh_elem_t *element = NULL;
-    esp_ble_mesh_model_t *model = NULL;
-    esp_err_t err = ESP_OK;
-
-    element = esp_ble_mesh_find_element(esp_ble_mesh_get_primary_element_address());
-    if (!element) {
-        ESP_LOGE(TAG, "Element 0x%04x not exists", esp_ble_mesh_get_primary_element_address());
-        return;
-    }
-
-    model = esp_ble_mesh_find_sig_model(element, ESP_BLE_MESH_MODEL_ID_DF_CLI);
-    if (!model) {
-        ESP_LOGE(TAG, "Directed Forwarding Client not exists");
-        return;
-    }
-
-    ble_mesh_set_msg_common(&param, node, model, ESP_BLE_MESH_MODEL_OP_DIRECTED_CONTROL_SET);
-
-    set.directed_control_set.net_idx = ble_mesh_key.net_idx;
-    set.directed_control_set.directed_forwarding = ESP_BLE_MESH_DIRECTED_FORWARDING_ENABLED;
-    set.directed_control_set.directed_relay = ESP_BLE_MESH_DIRECTED_RELAY_ENABLED;
-    set.directed_control_set.directed_proxy = ESP_BLE_MESH_DIRECTED_PROXY_IGNORE;
-    set.directed_control_set.directed_proxy_use_default = ESP_BLE_MESH_DIRECTED_PROXY_USE_DEFAULT_IGNORE;
-    set.directed_control_set.directed_friend = ESP_BLE_MESH_DIRECTED_FRIEND_IGNORE;
-
-
-    err = esp_ble_mesh_df_client_set_state(&param, &set);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to send Directed Forwarding Control Set");
-    }
-
-    return;
-}
-
 static void ble_mesh_df_client_cb(esp_ble_mesh_df_client_cb_event_t event,
                                   esp_ble_mesh_df_client_cb_param_t *param)
 {
+    ESP_LOGW(TAG, "Directed Forwarding Client Callback");
     switch (event)
     {
     case ESP_BLE_MESH_DF_CLIENT_RECV_SET_RSP_EVT:
-        ESP_LOGI(TAG, "Directed Forwarding Set");
+        ESP_LOGW(TAG, "Directed Forwarding Set");
         switch (param->params->opcode)
         {
         case ESP_BLE_MESH_MODEL_OP_DIRECTED_CONTROL_SET:
@@ -540,6 +541,7 @@ static void ble_mesh_df_client_cb(esp_ble_mesh_df_client_cb_event_t event,
         example_ble_mesh_send_directed_forwarding_srv_control_set(&node);
         break;
     default:
+        ESP_LOGE(TAG, "Directed Forwarding Client Callback Error");
         break;
     }
 }
@@ -1191,7 +1193,7 @@ void send_message(uint16_t dst_address, uint16_t length, uint8_t *data_ptr, bool
     ctx.app_idx = ble_mesh_key.app_idx;
     ctx.addr = dst_address;
     ctx.send_ttl = ble_message_ttl;
-    ctx.send_tag |= ESP_BLE_MESH_TAG_USE_DIRECTED | ESP_BLE_MESH_TAG_IMMUTABLE_CRED; 
+    ctx.send_tag |= ESP_BLE_MESH_TAG_USE_DIRECTED; 
 
     if (require_response)
     {
