@@ -83,10 +83,10 @@ static esp_ble_mesh_cfg_srv_t config_server = {
 static esp_ble_mesh_df_srv_t directed_forwarding_server = {
     .directed_net_transmit = ESP_BLE_MESH_TRANSMIT(1, 100),
     .directed_relay_retransmit = ESP_BLE_MESH_TRANSMIT(2, 100),
-    .default_rssi_threshold = (-80),
+    .default_rssi_threshold = (-100),
     .rssi_margin = 20,
-    .directed_node_paths = 20,
-    .directed_relay_paths = 20,
+    .directed_node_paths = 100,
+    .directed_relay_paths = 100,
 #if defined(CONFIG_BLE_MESH_GATT_PROXY_SERVER)
     .directed_proxy_paths = 20,
 #else
@@ -477,6 +477,8 @@ static esp_err_t prov_complete(uint16_t node_index, const esp_ble_mesh_octet16_t
 
     example_ble_mesh_send_directed_forwarding_srv_control_set(&nodes[node_index]);
 
+    
+
     // application level callback, let main() know provision is completed
     prov_complete_handler_cb(node_index, uuid, primary_addr, element_num, net_idx);  //==================== app level callback
 
@@ -524,9 +526,10 @@ static void ble_mesh_df_client_cb(esp_ble_mesh_df_client_cb_event_t event,
         switch (param->params->opcode)
         {
         case ESP_BLE_MESH_MODEL_OP_DIRECTED_CONTROL_SET:
-            if (param->recv.directed_control_status.status == ESP_BLE_MESH_DIRECTED_FORWARDING_ENABLED)  
+            if (param->recv.directed_control_status.status == 0x00)
             {
                 ESP_LOGI(TAG, "Enable Directed Forwarding state success");
+                //TODO: Try initial response message to establish path
             }
             else
             {
@@ -694,7 +697,7 @@ static void example_ble_mesh_remote_prov_client_callback(esp_ble_mesh_rpr_client
             {
             case ESP_BLE_MESH_MODEL_OP_RPR_SCAN_GET:
             {
-                if (param->recv.val.scan_status.status == ESP_BLE_MESH_RPR_STATUS_SUCCESS)
+                if (param->recv.val.scan_status.status == 0x00)
                 {
                     switch (param->recv.val.scan_status.rpr_scanning)
                     {

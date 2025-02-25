@@ -8,9 +8,13 @@
     "ble_mesh_example_nvs.h": "c",
     "random": "c",
     "ble_mesh_config_root.h": "c",
-    "iot_button.h": "c"
+    "iot_button.h": "c",
+    "esp_ble_mesh_defs.h": "c"
   },
   "idf.portWin": "COM3",
   "idf.flashType": "UART",
-  "idf.port": "/dev/ttyUSB0"
+  "idf.port": "/dev/ttyUSB0",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32h2"
+  }
 }
