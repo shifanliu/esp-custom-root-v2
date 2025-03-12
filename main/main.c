@@ -58,6 +58,8 @@ static void recv_message_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, u
     // ESP_LOGI(TAG_M, " ----------- recv_message handler trigered -----------");
     uint16_t node_addr = ctx->addr;
     ESP_LOGW(TAG_M, "-> Received Message \'%s\' from node-%d, opcode: [0x%06" PRIx32 "]", (char*)msg_ptr, node_addr, opcode);
+    printDfPaths();
+    printNetworkInfo();
     if(ctx->recv_cred == ESP_BLE_MESH_DIRECTED_CRED) {
         ESP_LOGI(TAG_M, "Received via Directed");
     } else {
@@ -199,7 +201,8 @@ static void send_df_info() {
 
     // Calculate the buffer size
     uint8_t path_data_size = sizeof(uint16_t) * 2; // path_origin + path_target
-    uint8_t buffer_size = 2 + df_path_count * path_data_size; // 1 byte for opcode, 1 byte for number of paths, rest for paths
+    uint8_t max_paths_per_batch = 40; // Send up to 40 paths at a time
+    uint8_t buffer_size = 2 + max_paths_per_batch * path_data_size; // 1 byte for opcode, 1 byte for number of paths, rest for paths
 
     uint8_t* buffer = (uint8_t*) malloc(buffer_size * sizeof(uint8_t));
     if (buffer == NULL) {
@@ -208,20 +211,37 @@ static void send_df_info() {
     }
 
     buffer[0] = 0x04; // Opcode for direct forwarding table info
-    buffer[1] = df_path_count; // Number of paths
 
-    uint8_t* buffer_itr = buffer + 2;
-    for (int i = 0; i < df_path_count; i++) {
-        uint16_t path_origin_network_order = htons(df_paths[i].path_origin);
-        uint16_t path_target_network_order = htons(df_paths[i].path_target);
+    int path_index = 0;
+    uint16_t paths_left = df_path_count;
 
-        memcpy(buffer_itr, &path_origin_network_order, sizeof(uint16_t));
-        buffer_itr += sizeof(uint16_t);
-        memcpy(buffer_itr, &path_target_network_order, sizeof(uint16_t));
-        buffer_itr += sizeof(uint16_t);
+    while (paths_left > 0) {
+        // Compute current batch size, max 40
+        uint8_t batch_size = (paths_left < max_paths_per_batch ? paths_left : max_paths_per_batch);
+        uint8_t* buffer_itr = buffer + 1;
+
+        // Load batch size (1 byte number of paths)
+        *buffer_itr = batch_size;
+        ++buffer_itr;
+
+        // Load all path data in this batch
+        for (int i = 0; i < batch_size; ++i) {
+            uint16_t path_origin_network_order = htons(df_paths[path_index].path_origin);
+            uint16_t path_target_network_order = htons(df_paths[path_index].path_target);
+
+            memcpy(buffer_itr, &path_origin_network_order, sizeof(uint16_t));
+            buffer_itr += sizeof(uint16_t);
+            memcpy(buffer_itr, &path_target_network_order, sizeof(uint16_t));
+            buffer_itr += sizeof(uint16_t);
+
+            // Move to next path
+            path_index += 1;
+        }
+
+        uart_sendData(0, buffer, buffer_itr - buffer);
+        paths_left -= batch_size;
     }
 
-    uart_sendData(0, buffer, buffer_size);
     free(buffer);
 }
 
@@ -293,9 +313,9 @@ static void execute_uart_command(char* command, size_t cmd_total_len) {
         uart_sendMsg(0, " - Reseting Root Module\n");
         reset_esp32();
     }
-    else if (strncmp(command, CMD_GET_DFT_INFO, 5) == 0)
+    else if (strncmp(command, CMD_GET_DFT_INFO, CMD_LEN) == 0)
     {
-        ESP_LOGI(TAG_E, "executing \'DFT\'");
+        ESP_LOGI(TAG_E, "executing \'DFINF\'");
         send_df_info();
     }
 
@@ -398,4 +418,5 @@ void app_main(void)
     memcpy(message_byte + 1, message, strlen(message));
     uart_sendData(0, message_byte, strlen(message) + 1);
     printNetworkInfo(); // esp log for debug
+    printDfPaths();
 }

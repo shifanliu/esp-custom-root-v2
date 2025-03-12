@@ -31,6 +31,8 @@ typedef struct {
 static df_path_t df_paths[MAX_DF_ENTRIES];
 static int df_path_count = 0;
 
+void printDfPaths();
+
 /**
  * @brief Print Network Nodes in dev logs (esp log function)
  *

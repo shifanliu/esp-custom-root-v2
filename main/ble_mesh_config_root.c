@@ -548,6 +548,15 @@ static void ble_mesh_df_client_cb(esp_ble_mesh_df_client_cb_event_t event,
     }
 }
 
+void printDfPaths() {
+    ESP_LOGW(TAG, "----------- Direct Forwarding Paths --------------");
+    ESP_LOGI(TAG, "Number of paths: %d", df_path_count);
+    for (int i = 0; i < df_path_count; i++) {
+        ESP_LOGI(TAG, "Path %d: Origin = 0x%04x, Target = 0x%04x", i, df_paths[i].path_origin, df_paths[i].path_target);
+    }
+    ESP_LOGW(TAG, "----------- End of Direct Forwarding Paths --------------");
+}
+
 static void ble_mesh_df_server_cb(esp_ble_mesh_df_server_cb_event_t event,
                                                            esp_ble_mesh_df_server_cb_param_t *param)
 {
@@ -602,13 +611,6 @@ static void ble_mesh_df_server_cb(esp_ble_mesh_df_server_cb_event_t event,
     }
 
     return;
-}
-
-void print_all_paths() {
-    ESP_LOGI(TAG, "Printing all paths");
-    for (int i = 0; i < df_path_count; i++) {
-        ESP_LOGI(TAG, "Path %d: 0x%04x -> 0x%04x", i, df_paths[i].path_origin, df_paths[i].path_target);
-    }
 }
 
 static void ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event, esp_ble_mesh_prov_cb_param_t *param)
