@@ -22,6 +22,15 @@
 #ifndef _BLE_ROOT_H_
 #define _BLE_ROOT_H_
 
+typedef struct {
+    uint16_t path_origin;
+    uint16_t path_target;
+} df_path_t;
+
+#define MAX_DF_ENTRIES 100
+static df_path_t df_paths[MAX_DF_ENTRIES];
+static int df_path_count = 0;
+
 /**
  * @brief Print Network Nodes in dev logs (esp log function)
  *

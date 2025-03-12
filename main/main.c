@@ -17,6 +17,7 @@
 #define CMD_BROADCAST_MSG "BCAST"
 #define CMD_RESET_ROOT "RST-R"
 #define CMD_CLEAN_NETWORK_CONFIG "CLEAN"
+#define CMD_GET_DFT_INFO "DFINFO"
 
 /***************** Event Handler *****************/
 // prov_complete_handler() get triger when a new node is provitioned to the network
@@ -193,6 +194,37 @@ static void send_network_info() {
     free(buffer);
 }
 
+static void send_df_info() {
+    ESP_LOGI(TAG_M, "Sending Direct Forwarding Table Info");
+
+    // Calculate the buffer size
+    uint8_t path_data_size = sizeof(uint16_t) * 2; // path_origin + path_target
+    uint8_t buffer_size = 2 + df_path_count * path_data_size; // 1 byte for opcode, 1 byte for number of paths, rest for paths
+
+    uint8_t* buffer = (uint8_t*) malloc(buffer_size * sizeof(uint8_t));
+    if (buffer == NULL) {
+        ESP_LOGE(TAG_M, "Memory allocation failed");
+        return;
+    }
+
+    buffer[0] = 0x04; // Opcode for direct forwarding table info
+    buffer[1] = df_path_count; // Number of paths
+
+    uint8_t* buffer_itr = buffer + 2;
+    for (int i = 0; i < df_path_count; i++) {
+        uint16_t path_origin_network_order = htons(df_paths[i].path_origin);
+        uint16_t path_target_network_order = htons(df_paths[i].path_target);
+
+        memcpy(buffer_itr, &path_origin_network_order, sizeof(uint16_t));
+        buffer_itr += sizeof(uint16_t);
+        memcpy(buffer_itr, &path_target_network_order, sizeof(uint16_t));
+        buffer_itr += sizeof(uint16_t);
+    }
+
+    uart_sendData(0, buffer, buffer_size);
+    free(buffer);
+}
+
 static void execute_uart_command(char* command, size_t cmd_total_len) {
     ESP_LOGI(TAG_M, "execute_command called");
     static const char *TAG_E = "EXE";
@@ -260,6 +292,11 @@ static void execute_uart_command(char* command, size_t cmd_total_len) {
         ESP_LOGI(TAG_E, "executing \'CLEAN\'");
         uart_sendMsg(0, " - Reseting Root Module\n");
         reset_esp32();
+    }
+    else if (strncmp(command, CMD_GET_DFT_INFO, 5) == 0)
+    {
+        ESP_LOGI(TAG_E, "executing \'DFT\'");
+        send_df_info();
     }
 
     // ====== other dev/debug use command ====== 

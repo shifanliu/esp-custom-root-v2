@@ -12,7 +12,6 @@
 #define TAG_W "Debug"
 #define TAG_INFO "Net_Info"
 
-
 static bool provision_enable = true;
 static uint8_t** important_message_data_list = NULL;
 static uint16_t important_message_data_lengths[] = {0, 0, 0};
@@ -567,6 +566,16 @@ static void ble_mesh_df_server_cb(esp_ble_mesh_df_server_cb_event_t event,
             memcpy(&path_origin, &change.df_table_info.df_table_entry_add_remove.path_origin, sizeof(path_origin));
             memcpy(&path_target, &change.df_table_info.df_table_entry_add_remove.path_target, sizeof(path_target));
             ESP_LOGI(TAG, "Established a path from 0x%04x to 0x%04x", path_origin.range_start, path_target.range_start);
+
+            if (df_path_count < MAX_DF_ENTRIES) {
+                df_paths[df_path_count].path_origin = path_origin.range_start;
+                df_paths[df_path_count].path_target = path_target.range_start;
+                df_path_count++;
+                ESP_LOGI(TAG, "Stored DF Path: 0x%04x -> 0x%04x", path_origin.range_start, path_target.range_start);
+            } else {
+                ESP_LOGW(TAG, "DF Table is full! Cannot store more paths.");
+            }
+            break;
         }
         break;
         case ESP_BLE_MESH_DF_TABLE_REMOVE:
@@ -574,6 +583,17 @@ static void ble_mesh_df_server_cb(esp_ble_mesh_df_server_cb_event_t event,
             memcpy(&path_origin, &change.df_table_info.df_table_entry_add_remove.path_origin, sizeof(path_origin));
             memcpy(&path_target, &change.df_table_info.df_table_entry_add_remove.path_target, sizeof(path_target));
             ESP_LOGI(TAG, "Remove a path from 0x%04x to 0x%04x", path_origin.range_start, path_target.range_start);
+
+            for (int i = 0; i < df_path_count; i++) {
+                if (df_paths[i].path_origin == path_origin.range_start && df_paths[i].path_target == path_target.range_start) {
+                    // Shift remaining paths to fill the gap
+                    for (int j = i; j < df_path_count - 1; j++) {
+                        df_paths[j] = df_paths[j + 1];
+                    }
+                    df_path_count--;
+                    break;
+                }
+            }
         }
         break;
         default:
@@ -582,6 +602,13 @@ static void ble_mesh_df_server_cb(esp_ble_mesh_df_server_cb_event_t event,
     }
 
     return;
+}
+
+void print_all_paths() {
+    ESP_LOGI(TAG, "Printing all paths");
+    for (int i = 0; i < df_path_count; i++) {
+        ESP_LOGI(TAG, "Path %d: 0x%04x -> 0x%04x", i, df_paths[i].path_origin, df_paths[i].path_target);
+    }
 }
 
 static void ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event, esp_ble_mesh_prov_cb_param_t *param)
