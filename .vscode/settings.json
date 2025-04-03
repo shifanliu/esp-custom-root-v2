@@ -9,9 +9,10 @@
     "random": "c",
     "ble_mesh_config_root.h": "c",
     "iot_button.h": "c",
-    "esp_ble_mesh_defs.h": "c"
+    "esp_ble_mesh_defs.h": "c",
+    "esp_ble_mesh_df_model_api.h": "c"
   },
-  "idf.portWin": "COM3",
+  "idf.portWin": "COM10",
   "idf.flashType": "UART",
   "idf.port": "/dev/tty.usbserial-1410",
   "idf.customExtraVars": {

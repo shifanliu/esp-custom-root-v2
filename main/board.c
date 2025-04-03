@@ -57,10 +57,10 @@ static void button_tap_cb(void* arg)
     //     control = 1;
     // }else 
     if (control == 1) {
-        char msg[20] = "TI0";
+        char msg[20] = "DFTR";
         uint16_t msg_length = strlen(msg);
-        send_message(node_addr, msg_length, (uint8_t *)msg, false);
-        uart_sendMsg(node_addr, "[Test] Sended Init to Node-6\n");
+        broadcast_message(msg_length, (uint8_t *)msg);
+        uart_sendMsg(node_addr, "Requesting DF data from edges\n");
         // control = 2;
     }
     //  else {

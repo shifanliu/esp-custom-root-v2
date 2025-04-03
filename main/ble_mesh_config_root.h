@@ -23,6 +23,7 @@
 #define _BLE_ROOT_H_
 
 typedef struct {
+    uint16_t node_addr;
     uint16_t path_origin;
     uint16_t path_target;
 } df_path_t;

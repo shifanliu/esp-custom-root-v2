@@ -82,8 +82,8 @@ static esp_ble_mesh_cfg_srv_t config_server = {
 static esp_ble_mesh_df_srv_t directed_forwarding_server = {
     .directed_net_transmit = ESP_BLE_MESH_TRANSMIT(1, 100),
     .directed_relay_retransmit = ESP_BLE_MESH_TRANSMIT(2, 100),
-    .default_rssi_threshold = (-100),
-    .rssi_margin = 20,
+    .default_rssi_threshold = (-90),
+    .rssi_margin = 0,
     .directed_node_paths = 100,
     .directed_relay_paths = 100,
 #if defined(CONFIG_BLE_MESH_GATT_PROXY_SERVER)
@@ -552,7 +552,7 @@ void printDfPaths() {
     ESP_LOGW(TAG, "----------- Direct Forwarding Paths --------------");
     ESP_LOGI(TAG, "Number of paths: %d", df_path_count);
     for (int i = 0; i < df_path_count; i++) {
-        ESP_LOGI(TAG, "Path %d: Origin = 0x%04x, Target = 0x%04x", i, df_paths[i].path_origin, df_paths[i].path_target);
+        ESP_LOGI(TAG, "Path %d: Node = 0x%04x Origin = 0x%04x, Target = 0x%04x", i, df_paths[i].node_addr, df_paths[i].path_origin, df_paths[i].path_target);
     }
     ESP_LOGW(TAG, "----------- End of Direct Forwarding Paths --------------");
 }
@@ -577,6 +577,7 @@ static void ble_mesh_df_server_cb(esp_ble_mesh_df_server_cb_event_t event,
             ESP_LOGI(TAG, "Established a path from 0x%04x to 0x%04x", path_origin.range_start, path_target.range_start);
 
             if (df_path_count < MAX_DF_ENTRIES) {
+                df_paths[df_path_count].node_addr = param->ctx.addr;
                 df_paths[df_path_count].path_origin = path_origin.range_start;
                 df_paths[df_path_count].path_target = path_target.range_start;
                 df_path_count++;
@@ -1369,6 +1370,7 @@ void broadcast_message(uint16_t length, uint8_t *data_ptr)
     ctx.app_idx = ble_mesh_key.app_idx;
     ctx.addr = 0xFFFF;
     ctx.send_ttl = ble_message_ttl;
+    ctx.send_tag |= ESP_BLE_MESH_TAG_USE_DIRECTED;
     
 
     err = esp_ble_mesh_client_model_send_msg(client_model, &ctx, opcode, length, data_ptr, MSG_TIMEOUT, false, message_role);

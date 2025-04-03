@@ -66,6 +66,19 @@ static void recv_message_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, u
         ESP_LOGI(TAG_M, "Received via Flooding");
     }
 
+    uint32_t cntrl_cmd;
+    memcpy(&cntrl_cmd, msg_ptr, 4);
+    uint32_t df_request_r = ECS_193_MODEL_OP_REQUEST_DFT_R;
+    
+    if(cntrl_cmd == df_request_r){
+        ESP_LOGI(TAG_M, "Received Request DFT R");
+        uint8_t dft_data[length-4];
+        memcpy(dft_data, msg_ptr+4, length-4);
+        memcpy(df_paths + df_path_count * sizeof(df_path_t), dft_data, sizeof(dft_data));
+        df_path_count += sizeof(dft_data) / sizeof(df_path_t);
+        return;
+    }
+
     // recived a ble-message from edge ndoe
     uart_sendData(node_addr, msg_ptr, length);
 
