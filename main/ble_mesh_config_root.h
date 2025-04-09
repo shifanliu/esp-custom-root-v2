@@ -26,7 +26,7 @@ typedef struct {
     uint16_t node_addr;
     uint16_t path_origin;
     uint16_t path_target;
-} df_path_t;
+} __attribute__((packed)) df_path_t;
 
 #define MAX_DF_ENTRIES 100
 static df_path_t df_paths[MAX_DF_ENTRIES];
