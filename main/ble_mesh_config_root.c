@@ -12,6 +12,8 @@
 #define TAG_W "Debug"
 #define TAG_INFO "Net_Info"
 
+int df_path_count = 0;
+
 static bool provision_enable = true;
 static uint8_t** important_message_data_list = NULL;
 static uint16_t important_message_data_lengths[] = {0, 0, 0};
@@ -577,7 +579,7 @@ static void ble_mesh_df_server_cb(esp_ble_mesh_df_server_cb_event_t event,
             ESP_LOGI(TAG, "Established a path from 0x%04x to 0x%04x", path_origin.range_start, path_target.range_start);
 
             if (df_path_count < MAX_DF_ENTRIES) {
-                df_paths[df_path_count].node_addr = param->ctx.addr;
+                df_paths[df_path_count].node_addr = esp_ble_mesh_get_primary_element_address();
                 df_paths[df_path_count].path_origin = path_origin.range_start;
                 df_paths[df_path_count].path_target = path_target.range_start;
                 df_path_count++;

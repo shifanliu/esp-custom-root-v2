@@ -72,10 +72,19 @@ static void recv_message_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, u
     
     if(cntrl_cmd == df_request_r){
         ESP_LOGI(TAG_M, "Received Request DFT R");
-        uint8_t dft_data[length-4];
-        memcpy(dft_data, msg_ptr+4, length-4);
-        memcpy(df_paths + df_path_count * sizeof(df_path_t), dft_data, sizeof(dft_data));
-        df_path_count += sizeof(dft_data) / sizeof(df_path_t);
+        int recv_path_count = (length-4) / sizeof(df_path_t);
+        df_path_t dft_data[recv_path_count];
+
+        for(int i = 0; i < recv_path_count; i++){
+            df_path_t *df_path = (df_path_t*)(msg_ptr+4+i*sizeof(df_path_t));
+            memcpy(&df_paths[df_path_count + i], df_path, sizeof(df_path_t));
+            ESP_LOGI(TAG_M, "Stored Received Path: %d | Node: %d, Origin: %d, Target: %d", df_path_count + i, df_path->node_addr, df_path->path_origin, df_path->path_target);
+        }
+        // memcpy(dft_data, msg_ptr+4, length-4);
+        // memcpy(df_paths + df_path_count * sizeof(df_path_t), dft_data, sizeof(dft_data));
+        int temp = sizeof(dft_data) / sizeof(df_path_t);
+        ESP_LOGI(TAG_M, "sizeof check: %d || msg_length: %d", temp, length);
+        df_path_count += recv_path_count;
         return;
     }
 

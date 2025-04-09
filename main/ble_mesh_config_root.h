@@ -30,7 +30,7 @@ typedef struct {
 
 #define MAX_DF_ENTRIES 100
 static df_path_t df_paths[MAX_DF_ENTRIES];
-static int df_path_count = 0;
+extern int df_path_count;
 
 void printDfPaths();
 
