@@ -11,8 +11,11 @@
 #define TAG TAG_ROOT
 #define TAG_W "Debug"
 #define TAG_INFO "Net_Info"
+#define WHITELIST_TEST_MODE false
+static bool whitelist_provisioned = false;
 
 int df_path_count = 0;
+df_path_t df_paths[MAX_DF_ENTRIES];
 
 static bool provision_enable = true;
 static uint8_t** important_message_data_list = NULL;
@@ -85,7 +88,7 @@ static esp_ble_mesh_df_srv_t directed_forwarding_server = {
     .directed_net_transmit = ESP_BLE_MESH_TRANSMIT(1, 100),
     .directed_relay_retransmit = ESP_BLE_MESH_TRANSMIT(2, 100),
     .default_rssi_threshold = (-90),
-    .rssi_margin = 0,
+    .rssi_margin = 1,
     .directed_node_paths = 100,
     .directed_relay_paths = 100,
 #if defined(CONFIG_BLE_MESH_GATT_PROXY_SERVER)
@@ -555,6 +558,14 @@ void printDfPaths() {
     ESP_LOGI(TAG, "Number of paths: %d", df_path_count);
     for (int i = 0; i < df_path_count; i++) {
         ESP_LOGI(TAG, "Path %d: Node = 0x%04x Origin = 0x%04x, Target = 0x%04x", i, df_paths[i].node_addr, df_paths[i].path_origin, df_paths[i].path_target);
+        ESP_LOGI(TAG, "Origin Dependents (%d):", df_paths[i].num_dependents_origin);
+        for(int j = 0; j < df_paths[i].num_dependents_origin; j++) {
+            ESP_LOGI(TAG, "0x%04x", df_paths[i].origin_dependents[j]);
+        }
+        ESP_LOGI(TAG, "Target Dependents (%d):", df_paths[i].num_dependents_target);
+        for(int j = 0; j < df_paths[i].num_dependents_target; j++) {
+            ESP_LOGI(TAG, "0x%04x", df_paths[i].target_dependents[j]);
+        }
     }
     ESP_LOGW(TAG, "----------- End of Direct Forwarding Paths --------------");
 }
@@ -582,6 +593,10 @@ static void ble_mesh_df_server_cb(esp_ble_mesh_df_server_cb_event_t event,
                 df_paths[df_path_count].node_addr = esp_ble_mesh_get_primary_element_address();
                 df_paths[df_path_count].path_origin = path_origin.range_start;
                 df_paths[df_path_count].path_target = path_target.range_start;
+                memcpy(&df_paths[df_path_count].origin_dependents, &change.df_table_info.df_table_entry_add_remove.dep_origin_data, sizeof(esp_ble_mesh_uar_t) * change.df_table_info.df_table_entry_add_remove.dep_origin_num);
+                df_paths[df_path_count].num_dependents_origin = change.df_table_info.df_table_entry_add_remove.dep_origin_num;
+                memcpy(&df_paths[df_path_count].target_dependents, &change.df_table_info.df_table_entry_add_remove.dep_target_data, sizeof(esp_ble_mesh_uar_t) * change.df_table_info.df_table_entry_add_remove.dep_target_num);
+                df_paths[df_path_count].num_dependents_target = change.df_table_info.df_table_entry_add_remove.dep_target_num;
                 df_path_count++;
                 ESP_LOGI(TAG, "Stored DF Path: 0x%04x -> 0x%04x", path_origin.range_start, path_target.range_start);
             } else {
@@ -1146,6 +1161,14 @@ static void example_ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t
 static void ble_mesh_custom_model_cb(esp_ble_mesh_model_cb_event_t event, esp_ble_mesh_model_cb_param_t *param)
 {
     // static int64_t start_time;
+
+    if(WHITELIST_TEST_MODE){
+        uint16_t wl_addr = 0x0005;
+        if(param->model_operation.ctx->addr > wl_addr){
+            ESP_LOGW(TAG, "DROPPING NON-WHITLISTED MESSAGE - addr: %04x", param->model_operation.ctx->addr);
+            return;
+        }
+    }
 
     switch (event) {
     case ESP_BLE_MESH_MODEL_OPERATION_EVT:

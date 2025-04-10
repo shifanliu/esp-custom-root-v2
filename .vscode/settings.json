@@ -12,7 +12,7 @@
     "esp_ble_mesh_defs.h": "c",
     "esp_ble_mesh_df_model_api.h": "c"
   },
-  "idf.portWin": "COM10",
+  "idf.portWin": "COM5",
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB1",
   "idf.customExtraVars": {
