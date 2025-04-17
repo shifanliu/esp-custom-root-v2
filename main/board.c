@@ -57,10 +57,7 @@ static void button_tap_cb(void* arg)
     //     control = 1;
     // }else 
     if (control == 1) {
-        char msg[20] = "DFTR";
-        uint16_t msg_length = strlen(msg);
-        broadcast_message(msg_length, (uint8_t *)msg);
-        uart_sendMsg(node_addr, "Requesting DF data from edges\n");
+        get_all_forwarding_tables();
         // control = 2;
     }
     //  else {

@@ -58,7 +58,7 @@ static void recv_message_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, u
     // ESP_LOGI(TAG_M, " ----------- recv_message handler trigered -----------");
     uint16_t node_addr = ctx->addr;
     ESP_LOGW(TAG_M, "-> Received Message \'%s\' from node-%d, opcode: [0x%06" PRIx32 "]", (char*)msg_ptr, node_addr, opcode);
-    printDfPaths();
+    //printDfPaths();
     printNetworkInfo();
     if(ctx->recv_cred == ESP_BLE_MESH_DIRECTED_CRED) {
         ESP_LOGI(TAG_M, "Received via Directed");
@@ -440,5 +440,5 @@ void app_main(void)
     memcpy(message_byte + 1, message, strlen(message));
     uart_sendData(0, message_byte, strlen(message) + 1);
     printNetworkInfo(); // esp log for debug
-    printDfPaths();
+    //printDfPaths();
 }

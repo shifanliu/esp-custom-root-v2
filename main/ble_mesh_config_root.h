@@ -37,6 +37,8 @@ extern df_path_t df_paths[MAX_DF_ENTRIES];
 extern int df_path_count;
 
 void printDfPaths();
+void get_node_forwarding_table(uint16_t node_addr);
+void get_all_forwarding_tables();
 
 /**
  * @brief Print Network Nodes in dev logs (esp log function)
