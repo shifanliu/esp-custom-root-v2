@@ -17,7 +17,7 @@
 #define CMD_BROADCAST_MSG "BCAST"
 #define CMD_RESET_ROOT "RST-R"
 #define CMD_CLEAN_NETWORK_CONFIG "CLEAN"
-#define CMD_GET_DFT_INFO "DFINFO"
+#define CMD_GET_DF "GETDF"
 
 /***************** Event Handler *****************/
 // prov_complete_handler() get triger when a new node is provitioned to the network
@@ -172,92 +172,91 @@ static void connectivity_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, u
 }
 
 /***************** Other Functions *****************/
+
 static void send_network_info() {
     // craft bytes of network info and send to uart
     uint16_t node_count = esp_ble_mesh_provisioner_get_prov_node_count();
-    uint16_t node_left = node_count;
     const esp_ble_mesh_node_t **nodeTableEntry = esp_ble_mesh_provisioner_get_node_table_entry();
+
+    if (!nodeTableEntry || node_count == 0) {
+        ESP_LOGW(TAG_M, "No provisioned nodes to send.");
+        return;
+    }
 
     // 18 byte per node, send up to 40 node everytime
     uint8_t node_data_size = NODE_ADDR_LEN + NODE_UUID_LEN; // node_addr + node_uuid size
-    uint8_t buffer_size = OPCODE_LEN + 1 + 40 * node_data_size; // 3 byte opcode, 1 byte node amount, up to 40 node
+    uint8_t buffer_size = OPCODE_LEN + 1 + 40 * node_data_size; // 1 byte opcode, 1 byte count, node data
     uint8_t* buffer = (uint8_t*) malloc(buffer_size * sizeof(uint8_t));
+    if (!buffer) {
+        ESP_LOGE(TAG_M, "Memory allocation failed");
+        return;
+    }
 
-    buffer[0] = 0x01; //network info
+    buffer[0] = 0x01; // network info opcode
 
-    int node_index = 0;
-    while (node_left > 0)
-    {
-        const esp_ble_mesh_node_t *node_itr = nodeTableEntry[node_index];
-        // compute current ctach, max 40
-        uint8_t batch_size = (node_left < 40 ? node_left : 40);
-        uint8_t* buffer_itr = buffer + OPCODE_LEN;
+    int sent = 0;
+    while (sent < node_count) {
+        uint8_t* buffer_itr = buffer + OPCODE_LEN + 1;  // leave space for opcode and batch size
+        uint8_t batch_size = 0;
 
-        // load batch size (1 byte node amount)
-        *buffer_itr = batch_size;
-        ++buffer_itr;
+        for (int i = 0; i < 40 && sent < node_count; ++sent) {
+            const esp_ble_mesh_node_t *node = nodeTableEntry[sent];
+            uint16_t node_addr = node->unicast_addr;
 
-        // load all node data in this batch
-        for (int i = 0; i < batch_size; ++i) {
-            // load current node
-            uint16_t node_addr = node_itr->unicast_addr;
-            uint16_t node_addr_network_endian = htons(node_addr);
-
-            memcpy(buffer_itr, &node_addr_network_endian, NODE_ADDR_LEN);
+            uint16_t node_addr_be = htons(node_addr);
+            memcpy(buffer_itr, &node_addr_be, NODE_ADDR_LEN);
             buffer_itr += NODE_ADDR_LEN;
-            memcpy(buffer_itr, node_itr->dev_uuid, NODE_UUID_LEN);
+            memcpy(buffer_itr, node->dev_uuid, NODE_UUID_LEN);
             buffer_itr += NODE_UUID_LEN;
-
-            // move to next node
-            node_index += 1;
+            ++batch_size;
+            ++i;
         }
 
-        uart_sendData(0, buffer, buffer_itr-buffer);
-        node_left -= batch_size;
+        if (batch_size > 0) {
+            buffer[1] = batch_size;  // write actual batch size after opcode
+            uart_sendData(0, buffer, buffer_itr - buffer);
+        }
     }
+
     free(buffer);
 }
 
 static void send_df_info() {
     ESP_LOGI(TAG_M, "Sending Direct Forwarding Table Info");
 
-    // Calculate the buffer size
-    uint8_t path_data_size = sizeof(uint16_t) * 2; // path_origin + path_target
-    uint8_t max_paths_per_batch = 40; // Send up to 40 paths at a time
-    uint8_t buffer_size = 2 + max_paths_per_batch * path_data_size; // 1 byte for opcode, 1 byte for number of paths, rest for paths
+    uint8_t path_data_size = sizeof(uint16_t) * 2;
+    uint8_t max_paths_per_batch = 40;
+    uint8_t buffer_size = OPCODE_LEN + 1 + max_paths_per_batch * path_data_size;
 
-    uint8_t* buffer = (uint8_t*) malloc(buffer_size * sizeof(uint8_t));
+    if (df_path_count == 0) {
+        uint8_t empty_msg[2] = {0x04, 0x00};  // opcode + 0 paths
+        uart_sendData(0, empty_msg, sizeof(empty_msg));
+        return;
+    }
+
+    uint8_t* buffer = (uint8_t*) malloc(buffer_size);
     if (buffer == NULL) {
         ESP_LOGE(TAG_M, "Memory allocation failed");
         return;
     }
 
-    buffer[0] = 0x04; // Opcode for direct forwarding table info
-
+    buffer[0] = 0x04;
     int path_index = 0;
     uint16_t paths_left = df_path_count;
 
     while (paths_left > 0) {
-        // Compute current batch size, max 40
         uint8_t batch_size = (paths_left < max_paths_per_batch ? paths_left : max_paths_per_batch);
-        uint8_t* buffer_itr = buffer + 1;
+        uint8_t* buffer_itr = buffer + OPCODE_LEN;
 
-        // Load batch size (1 byte number of paths)
         *buffer_itr = batch_size;
         ++buffer_itr;
 
-        // Load all path data in this batch
         for (int i = 0; i < batch_size; ++i) {
-            uint16_t path_origin_network_order = htons(df_paths[path_index].path_origin);
-            uint16_t path_target_network_order = htons(df_paths[path_index].path_target);
-
-            memcpy(buffer_itr, &path_origin_network_order, sizeof(uint16_t));
-            buffer_itr += sizeof(uint16_t);
-            memcpy(buffer_itr, &path_target_network_order, sizeof(uint16_t));
-            buffer_itr += sizeof(uint16_t);
-
-            // Move to next path
-            path_index += 1;
+            uint16_t origin_be = htons(df_paths[path_index].path_origin);
+            uint16_t target_be = htons(df_paths[path_index].path_target);
+            memcpy(buffer_itr, &origin_be, 2); buffer_itr += 2;
+            memcpy(buffer_itr, &target_be, 2); buffer_itr += 2;
+            ++path_index;
         }
 
         uart_sendData(0, buffer, buffer_itr - buffer);
@@ -266,6 +265,7 @@ static void send_df_info() {
 
     free(buffer);
 }
+
 
 static void execute_uart_command(char* command, size_t cmd_total_len) {
     ESP_LOGI(TAG_M, "execute_command called");
@@ -289,10 +289,16 @@ static void execute_uart_command(char* command, size_t cmd_total_len) {
     }
 
     // ====== core commands ====== 
+    if (strncmp(command, CMD_GET_DF, CMD_LEN) == 0) {
+        ESP_LOGI(TAG_E, "executing \'GETDF\'");
+        send_df_info();
+    } 
+    
     if (strncmp(command, CMD_GET_NET_INFO, CMD_LEN) == 0) {
         send_network_info();
     } 
-    else if (strncmp(command, CMD_SEND_MSG, CMD_LEN) == 0) {
+    
+    if (strncmp(command, CMD_SEND_MSG, CMD_LEN) == 0) {
         ESP_LOGI(TAG_E, "executing \'SEND-\'");
         char *address_start = command + CMD_LEN;
         char *msg_start = address_start + NODE_ADDR_LEN;
@@ -318,29 +324,23 @@ static void execute_uart_command(char* command, size_t cmd_total_len) {
         send_message(node_addr, msg_length, (uint8_t *) msg_start, false);
         ESP_LOGW(TAG_M, "<- Sended Message [%s]", (char *)msg_start);
     } 
-    else if (strncmp(command, CMD_BROADCAST_MSG, CMD_LEN) == 0) {
+    if (strncmp(command, CMD_BROADCAST_MSG, CMD_LEN) == 0) {
         ESP_LOGI(TAG_E, "executing \'BCAST\'");
         char *msg_start = command + CMD_LEN + NODE_ADDR_LEN;
         size_t msg_length = cmd_total_len - CMD_LEN - NODE_ADDR_LEN;
 
         broadcast_message(msg_length, (uint8_t *)msg_start);
     }
-    else if (strncmp(command, CMD_RESET_ROOT, 5) == 0) {
+    if (strncmp(command, CMD_RESET_ROOT, 5) == 0) {
         ESP_LOGI(TAG_E, "executing \'RST-R\'");
         esp_restart();
     }
-    else if (strncmp(command, CMD_CLEAN_NETWORK_CONFIG, 5) == 0)
+    if (strncmp(command, CMD_CLEAN_NETWORK_CONFIG, 5) == 0)
     {
         ESP_LOGI(TAG_E, "executing \'CLEAN\'");
         uart_sendMsg(0, " - Reseting Root Module\n");
         reset_esp32();
     }
-    else if (strncmp(command, CMD_GET_DFT_INFO, CMD_LEN) == 0)
-    {
-        ESP_LOGI(TAG_E, "executing \'DFINF\'");
-        send_df_info();
-    }
-
     // ====== other dev/debug use command ====== 
     // else if (strncmp(command, "ECHO-", 5) == 0) {
     //     // echo test
@@ -422,7 +422,7 @@ void app_main(void)
     // turn off log - Important, bc the server counting on uart escape byte 0xff and 0xfe
     //              - So need to enforce all uart traffic
     //              - use uart_sendMsg or uart_sendData for message, the esp_log for dev debug
-    // esp_log_level_set(TAG_ALL, ESP_LOG_NONE);
+    esp_log_level_set(TAG_ALL, ESP_LOG_NONE);
     
     esp_err_t err = esp_module_root_init(prov_complete_handler, config_complete_handler, recv_message_handler, recv_response_handler, timeout_handler, broadcast_handler, connectivity_handler);
     if (err != ESP_OK) {
