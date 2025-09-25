@@ -53,17 +53,31 @@ static void config_complete_handler(uint16_t node_addr) {
     printNetworkInfo(); // esp log for debug
 }
 
-// recv_message_handler() get triger when module recived an message
+// recv_message_handler() get triger when module recived an message 
 static void recv_message_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, uint8_t *msg_ptr, uint32_t opcode) {
-    // ESP_LOGI(TAG_M, " ----------- recv_message handler trigered -----------");
     uint16_t node_addr = ctx->addr;
-    ESP_LOGW(TAG_M, "-> Received Message \'%s\' from node-%d, opcode: [0x%06" PRIx32 "]", (char*)msg_ptr, node_addr, opcode);
-    //printDfPaths();
+    ESP_LOGW(TAG_M, "-> Received Message len=%d from node-%d, opcode: [0x%06" PRIx32 "]",
+             length, node_addr, opcode);
     printNetworkInfo();
     if(ctx->recv_cred == ESP_BLE_MESH_DIRECTED_CRED) {
         ESP_LOGI(TAG_M, "Received via Directed");
     } else {
         ESP_LOGI(TAG_M, "Received via Flooding");
+    }
+
+    // check if message is sensor_data_t (timestamp + distance)
+    if (length == sizeof(sensor_data_t)) {
+        sensor_data_t *data = (sensor_data_t *)msg_ptr;
+        ESP_LOGI(TAG_M, "[SENSOR] Node=%d Time=%u ms Distance=%d cm",
+                node_addr, data->timestamp, data->distance);
+
+        // forward as JSON to Python server
+        char json_buf[64];
+        int json_len = snprintf(json_buf, sizeof(json_buf),
+                               "{\"node\":%d,\"time\":%u,\"distance\":%d}\n",
+                               node_addr, data->timestamp, data->distance);
+        uart_sendData(node_addr, (uint8_t *)json_buf, json_len);
+        return;
     }
 
     uint32_t cntrl_cmd;
@@ -78,17 +92,16 @@ static void recv_message_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, u
         for(int i = 0; i < recv_path_count; i++){
             df_path_t *df_path = (df_path_t*)(msg_ptr+4+i*sizeof(df_path_t));
             memcpy(&df_paths[df_path_count + i], df_path, sizeof(df_path_t));
-            ESP_LOGI(TAG_M, "Stored Received Path: %d | Node: %d, Origin: %d, Target: %d", df_path_count + i, df_path->node_addr, df_path->path_origin, df_path->path_target);
+            ESP_LOGI(TAG_M, "Stored Received Path: %d | Node: %d, Origin: %d, Target: %d",
+                     df_path_count + i, df_path->node_addr, df_path->path_origin, df_path->path_target);
         }
-        // memcpy(dft_data, msg_ptr+4, length-4);
-        // memcpy(df_paths + df_path_count * sizeof(df_path_t), dft_data, sizeof(dft_data));
         int temp = sizeof(dft_data) / sizeof(df_path_t);
         ESP_LOGI(TAG_M, "sizeof check: %d || msg_length: %d", temp, length);
         df_path_count += recv_path_count;
         return;
     }
 
-    // recived a ble-message from edge ndoe
+    // recived a ble-message from edge node
     uart_sendData(node_addr, msg_ptr, length);
 
     // check if needs an response to confirm recived
@@ -100,17 +113,19 @@ static void recv_message_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, u
     // important retansmit test code -----------------------------------------------
     if (opcode == ECS_193_MODEL_OP_MESSAGE_I_0 || opcode == ECS_193_MODEL_OP_MESSAGE_I_1 || opcode == ECS_193_MODEL_OP_MESSAGE_I_2) {
         if (ctx->send_ttl <= DEFAULT_MSG_SEND_TTL) {
-            // only response to increased TTL message for testin
-            ESP_LOGE(TAG_M, "Ignoring Important message on first few transmission on purpose for testing, send_ttl:%d recv_ttl:%d",ctx->send_ttl, ctx->recv_ttl);
+            ESP_LOGE(TAG_M, "Ignoring Important message on first few transmission on purpose for testing, send_ttl:%d recv_ttl:%d",
+                     ctx->send_ttl, ctx->recv_ttl);
             return;
         }
 
-        ESP_LOGW(TAG_M, "---------- send_ttl:%d recv_ttl:%d default_ttl:%d",ctx->send_ttl,  ctx->recv_ttl, DEFAULT_MSG_SEND_TTL);
+        ESP_LOGW(TAG_M, "---------- send_ttl:%d recv_ttl:%d default_ttl:%d",
+                 ctx->send_ttl,  ctx->recv_ttl, DEFAULT_MSG_SEND_TTL);
         
         if ( ctx->recv_ttl <= DEFAULT_MSG_SEND_TTL) {
             return;
         }
-        ESP_LOGW(TAG_M, "====----- send_ttl:%d recv_ttl:%d default_ttl:%d",ctx->send_ttl,  ctx->recv_ttl, DEFAULT_MSG_SEND_TTL);
+        ESP_LOGW(TAG_M, "====----- send_ttl:%d recv_ttl:%d default_ttl:%d",
+                 ctx->send_ttl,  ctx->recv_ttl, DEFAULT_MSG_SEND_TTL);
     }
     // important retansmit test code -----------------------------------------------
 
@@ -118,7 +133,8 @@ static void recv_message_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, u
     char response[5] = "S";
     uint16_t response_length = strlen(response);
     send_response(ctx, response_length, (uint8_t *)response, opcode);
-    ESP_LOGW(TAG_M, "<- Sended Response %d bytes \'%*s\'", response_length, response_length, (char *)response);
+    ESP_LOGW(TAG_M, "<- Sended Response %d bytes \'%*s\'", response_length,
+             response_length, (char *)response);
 }
 
 // recv_response_handler() get triger when module recived an response to previouse sent message that requires an response

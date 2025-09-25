@@ -32,6 +32,11 @@ typedef struct {
     uint16_t num_dependents_target;
 } __attribute__((packed)) df_path_t;
 
+typedef struct {
+    uint32_t timestamp;   // ms
+    int16_t distance;     // cm
+} __attribute__((packed)) sensor_data_t;
+
 #define MAX_DF_ENTRIES 100
 extern df_path_t df_paths[MAX_DF_ENTRIES];
 extern int df_path_count;

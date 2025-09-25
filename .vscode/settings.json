@@ -12,10 +12,13 @@
     "esp_ble_mesh_defs.h": "c",
     "esp_ble_mesh_df_model_api.h": "c"
   },
-  "idf.portWin": "COM5",
+  "idf.portWin": "COM3",
   "idf.flashType": "UART",
   "idf.port": "/dev/tty.usbserial-1410",
   "idf.customExtraVars": {
     "IDF_TARGET": "esp32h2"
-  }
+  },
+  "idf.espIdfPathWin": "d:\\users\\esp\\v5.5\\esp-idf",
+  "idf.toolsPathWin": "d:\\users\\.espressif",
+  "idf.pythonInstallPath": "d:\\users\\.espressif\\tools\\idf-python\\3.11.2\\python.exe"
 }
