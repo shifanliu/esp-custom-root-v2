@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <arpa/inet.h> // for host byte endianess <--> network byte endianess convert
 #include "esp_log.h"
+#include <inttypes.h>   // for PRId32 macros
 
 #define TAG_M "MAIN"
 #define TAG_ALL "*"
@@ -65,17 +66,22 @@ static void recv_message_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, u
         ESP_LOGI(TAG_M, "Received via Flooding");
     }
 
-    // check if message is sensor_data_t (timestamp + distance)
-    if (length == sizeof(sensor_data_t)) {
-        sensor_data_t *data = (sensor_data_t *)msg_ptr;
-        ESP_LOGI(TAG_M, "[SENSOR] Node=%d Time=%u ms Distance=%d cm",
-                node_addr, data->timestamp, data->distance);
+    // check if message is GPS info
+    if (length == sizeof(gps_data_t)) {
+        gps_data_t *gps = (gps_data_t *)msg_ptr;
+        ESP_LOGI(TAG_M, "[GPS] Node=%d Lat=%" PRId32 " Lon=%" PRId32 " UTC=%" PRId32
+                        " Flag=%d Sats=%d Btn=%d",
+                node_addr, gps->latitude, gps->longitude, gps->utc_time,
+                gps->gps_flag, gps->num_satellites, gps->button_state);
 
-        // forward as JSON to Python server
-        char json_buf[64];
+        // forward JSON to Python server
+        char json_buf[128];
         int json_len = snprintf(json_buf, sizeof(json_buf),
-                               "{\"node\":%d,\"time\":%u,\"distance\":%d}\n",
-                               node_addr, data->timestamp, data->distance);
+            "{\"node\":%d,\"lat\":%" PRId32 ",\"lon\":%" PRId32 ",\"utc\":%" PRId32 ","
+            "\"flag\":%d,\"sats\":%d,\"button\":%d}\n",
+            node_addr, gps->latitude, gps->longitude, gps->utc_time,
+            gps->gps_flag, gps->num_satellites, gps->button_state);
+
         uart_sendData(node_addr, (uint8_t *)json_buf, json_len);
         return;
     }

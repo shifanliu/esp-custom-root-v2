@@ -33,10 +33,13 @@ typedef struct {
 } __attribute__((packed)) df_path_t;
 
 typedef struct {
-    // GPS(2（经纬度）* 32bit signed-int, UTC time), GPS flag (healthy/unhealthy(0/1)), number of satellites(int), button stat, [imu 6 float]
-    uint32_t timestamp;   // ms
-    int16_t distance;     // cm
-} __attribute__((packed)) sensor_data_t;
+    int32_t latitude;       // 32-bit signed, scaled by 1e7 if needed
+    int32_t longitude;      // 32-bit signed, scaled by 1e7 if needed
+    int32_t utc_time;       // 32-bit signed, Unix timestamp or seconds
+    uint8_t gps_flag;       // 0=unhealthy, 1=healthy
+    uint16_t num_satellites;// number of satellites
+    uint8_t button_state;   // 0=not pressed, 1=pressed
+} __attribute__((packed)) gps_data_t;
 
 #define MAX_DF_ENTRIES 100
 extern df_path_t df_paths[MAX_DF_ENTRIES];
