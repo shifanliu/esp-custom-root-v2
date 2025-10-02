@@ -33,7 +33,7 @@ typedef struct {
 } __attribute__((packed)) df_path_t;
 
 typedef struct {
-    // GPS(2* 32bit signed-int), UTC time, GPS healthy/unhealthy(0/1), number of satellites(int), button stat, [imu 6 float]
+    // GPS(2（经纬度）* 32bit signed-int, UTC time), GPS flag (healthy/unhealthy(0/1)), number of satellites(int), button stat, [imu 6 float]
     uint32_t timestamp;   // ms
     int16_t distance;     // cm
 } __attribute__((packed)) sensor_data_t;
