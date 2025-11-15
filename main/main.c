@@ -56,6 +56,32 @@ static void config_complete_handler(uint16_t node_addr) {
 
 // recv_message_handler() get triger when module recived an message 
 static void recv_message_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, uint8_t *msg_ptr, uint32_t opcode) {
+    // send ACK when receiving message from EDGE
+    {
+        ESP_LOGI(TAG_M, "[ROOT] Received message, preparing ACK...");
+
+        // send 0x01 as an ack
+        uint8_t ack_payload[1] = {0x01};
+
+        esp_ble_mesh_msg_ctx_t ack_ctx = *ctx;
+        ack_ctx.send_rel = false;
+        ack_ctx.send_ttl = DEFAULT_MSG_SEND_TTL; 
+
+        esp_err_t err = esp_ble_mesh_server_model_send_msg(
+            server_model,
+            &ack_ctx, 
+            ECS_193_MODEL_OP_RESPONSE,
+            sizeof(ack_payload),
+            ack_payload
+        );
+
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG_M, "[ROOT] ACK sent to Edge (addr=0x%04X)", ctx->addr);
+        } else {
+            ESP_LOGE(TAG_M, "[ROOT] Failed to send ACK: %s", esp_err_to_name(err));
+        }
+    }
+    
     uint16_t node_addr = ctx->addr;
     ESP_LOGW(TAG_M, "-> Received Message len=%d from node-%d, opcode: [0x%06" PRIx32 "]",
              length, node_addr, opcode);

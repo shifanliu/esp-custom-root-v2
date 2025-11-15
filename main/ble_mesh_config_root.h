@@ -45,6 +45,8 @@ typedef struct {
 extern df_path_t df_paths[MAX_DF_ENTRIES];
 extern int df_path_count;
 
+extern esp_ble_mesh_model_t *server_model;
+
 void printDfPaths();
 void get_node_forwarding_table(uint16_t node_addr);
 void get_all_forwarding_tables();

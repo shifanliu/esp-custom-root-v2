@@ -171,7 +171,8 @@ static esp_ble_mesh_model_t vnd_models[] = { // custom models
 };
 
 static esp_ble_mesh_model_t *client_model = &vnd_models[0];
-static esp_ble_mesh_model_t *server_model = &vnd_models[1];
+esp_ble_mesh_model_t *server_model = &vnd_models[1];
+// static esp_ble_mesh_model_t *server_model = &vnd_models[1];
 
 static esp_ble_mesh_elem_t elements[] = {
     ESP_BLE_MESH_ELEMENT(0, root_models, vnd_models),
