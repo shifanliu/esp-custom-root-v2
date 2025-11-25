@@ -1231,6 +1231,73 @@ static esp_err_t config_complete(esp_ble_mesh_msg_ctx_t ctx) {
     return ESP_OK;
 }
 
+static esp_err_t custom_model_bind_appkey(uint16_t app_idx) {
+    const esp_ble_mesh_comp_t *comp = NULL;
+    esp_ble_mesh_elem_t *element = NULL;
+    esp_ble_mesh_model_t *model = NULL;
+    int i, j, k;
+
+    comp = &composition;
+    if (!comp) {
+        return ESP_FAIL;
+    }
+
+    for (i = 0; i < comp->element_count; i++) {
+        element = &comp->elements[i];
+        /* Bind app_idx with SIG models except the Config Client & Server models */
+        for (j = 0; j < element->sig_model_count; j++) {
+            model = &element->sig_models[j];
+            if (model->model_id == ESP_BLE_MESH_MODEL_ID_CONFIG_SRV ||
+                    model->model_id == ESP_BLE_MESH_MODEL_ID_CONFIG_CLI) {
+                continue;
+            }
+            for (k = 0; k < ARRAY_SIZE(model->keys); k++) {
+                if (model->keys[k] == app_idx) {
+                    break;
+                }
+            }
+            if (k != ARRAY_SIZE(model->keys)) {
+                continue;
+            }
+            for (k = 0; k < ARRAY_SIZE(model->keys); k++) {
+                if (model->keys[k] == ESP_BLE_MESH_KEY_UNUSED) {
+                    model->keys[k] = app_idx;
+                    break;
+                }
+            }
+            if (k == ARRAY_SIZE(model->keys)) {
+                ESP_LOGE(TAG, "%s: SIG model (model_id 0x%04x) is full of AppKey",
+                         __func__, model->model_id);
+            }
+        }
+        /* Bind app_idx with Vendor models */
+        for (j = 0; j < element->vnd_model_count; j++) {
+            model = &element->vnd_models[j];
+            for (k = 0; k < ARRAY_SIZE(model->keys); k++) {
+                if (model->keys[k] == app_idx) {
+                    break;
+                }
+            }
+            if (k != ARRAY_SIZE(model->keys)) {
+                continue;
+            }
+            for (k = 0; k < ARRAY_SIZE(model->keys); k++) {
+                if (model->keys[k] == ESP_BLE_MESH_KEY_UNUSED) {
+                    model->keys[k] = app_idx;
+                    break;
+                }
+            }
+            if (k == ARRAY_SIZE(model->keys)) {
+                ESP_LOGE(TAG, "%s: Vendor model (model_id 0x%04x, cid: 0x%04x) is full of AppKey",
+                         __func__, model->vnd.model_id, model->vnd.company_id);
+            }
+        }
+    }
+
+    return ESP_OK;
+    // return example_set_app_idx_to_user_data(app_idx);
+}
+
 static void example_ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event, esp_ble_mesh_cfg_client_cb_param_t *param)
 {
     esp_ble_mesh_client_common_param_t common = {0};
@@ -1781,6 +1848,9 @@ esp_err_t esp_module_root_init(
         ESP_LOGE(TAG, "esp32_bluetooth_init failed (err %d)", err);
         return ESP_FAIL;
     }
+
+    ESP_LOGI(TAG, "Binding AppKey 0x0000 to root vendor models");
+    custom_model_bind_appkey(APP_KEY_IDX);
 
     // /* Open nvs namespace for storing/restoring mesh example info */
     // err = ble_mesh_nvs_open(&NVS_HANDLE);

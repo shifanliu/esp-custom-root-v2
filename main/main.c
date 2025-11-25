@@ -67,6 +67,8 @@ static void recv_message_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, u
         ack_ctx.send_rel = false;
         ack_ctx.send_ttl = DEFAULT_MSG_SEND_TTL; 
 
+        ESP_LOGE(TAG_M, "ROOT ACK opcode = 0x%06" PRIx32, ECS_193_MODEL_OP_RESPONSE);
+
         esp_err_t err = esp_ble_mesh_server_model_send_msg(
             server_model,
             &ack_ctx, 
