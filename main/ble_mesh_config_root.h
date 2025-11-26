@@ -32,13 +32,15 @@ typedef struct {
     uint16_t num_dependents_target;
 } __attribute__((packed)) df_path_t;
 
-typedef struct {
-    int32_t latitude;       // 32-bit signed, scaled by 1e7 if needed
-    int32_t longitude;      // 32-bit signed, scaled by 1e7 if needed
-    int32_t utc_time;       // 32-bit signed, Unix timestamp or seconds
-    uint8_t gps_flag;       // 0=unhealthy, 1=healthy
-    uint16_t num_satellites;// number of satellites
-    uint8_t button_state;   // 0=not pressed, 1=pressed
+typedef struct gps_data {
+    char     gps_time[32]; // Unix timestamp or seconds
+    int32_t  fixType;
+    int32_t  gnssFixOK;    // 0=unhealthy, 1=healthy
+    int32_t  diffSoln;
+    int32_t  numSV;        // number of satellites
+    int32_t  lat;          // 32-bit signed, scaled by 1e7 if needed
+    int32_t  lon;          // 32-bit signed, scaled by 1e7 if needed
+    uint8_t  button_state; // 0=not pressed, 1=pressed
 } __attribute__((packed)) gps_data_t;
 
 #define MAX_DF_ENTRIES 100

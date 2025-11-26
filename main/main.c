@@ -97,18 +97,38 @@ static void recv_message_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, u
     // check if message is GPS info
     if (length == sizeof(gps_data_t)) {
         gps_data_t *gps = (gps_data_t *)msg_ptr;
-        ESP_LOGI(TAG_M, "[GPS] Node=%d Lat=%" PRId32 " Lon=%" PRId32 " UTC=%" PRId32
-                        " Flag=%d Sats=%d Btn=%d",
-                node_addr, gps->latitude, gps->longitude, gps->utc_time,
-                gps->gps_flag, gps->num_satellites, gps->button_state);
+
+        ESP_LOGI(TAG_M,
+            "[GPS] Node=%d Time=%s Lat=%" PRId32 " Lon=%" PRId32 
+            " fixType=%" PRId32 " gnssOK=%" PRId32 " diffSoln=%" PRId32
+            " SV=%" PRId32 " Btn=%d",
+            node_addr,
+            gps->gps_time,
+            gps->lat, gps->lon,
+            gps->fixType, gps->gnssFixOK, gps->diffSoln,
+            gps->numSV,
+            gps->button_state
+        );
 
         // forward JSON to Python server
-        char json_buf[128];
+        char json_buf[256];
         int json_len = snprintf(json_buf, sizeof(json_buf),
-            "{\"node\":%d,\"lat\":%" PRId32 ",\"lon\":%" PRId32 ",\"utc\":%" PRId32 ","
-            "\"flag\":%d,\"sats\":%d,\"button\":%d}\n",
-            node_addr, gps->latitude, gps->longitude, gps->utc_time,
-            gps->gps_flag, gps->num_satellites, gps->button_state);
+            "{\"node\":%d,"
+            "\"gps_time\":\"%s\","
+            "\"lat\":%" PRId32 ","
+            "\"lon\":%" PRId32 ","
+            "\"fixType\":%" PRId32 ","
+            "\"gnssFixOK\":%" PRId32 ","
+            "\"diffSoln\":%" PRId32 ","
+            "\"numSV\":%" PRId32 ","
+            "\"button\":%d}\n",
+            node_addr,
+            gps->gps_time,
+            gps->lat, gps->lon,
+            gps->fixType, gps->gnssFixOK, gps->diffSoln,
+            gps->numSV,
+            gps->button_state
+        );
 
         uart_sendData(node_addr, (uint8_t *)json_buf, json_len);
         return;
