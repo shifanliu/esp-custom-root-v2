@@ -61,7 +61,14 @@ static void recv_message_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, u
         ESP_LOGI(TAG_M, "[ROOT] Received message, preparing ACK...");
 
         // send 0x01 as an ack
-        uint8_t ack_payload[1] = {0x01};
+        // uint8_t ack_payload[1] = {0x01};
+        uint8_t ack_payload[1];
+
+        if (ctx->recv_cred == ESP_BLE_MESH_DIRECTED_CRED) {
+            ack_payload[0] = 'D';   // Directed forwarding
+        } else {
+            ack_payload[0] = 'F';   // Flooding
+        }
 
         esp_ble_mesh_msg_ctx_t ack_ctx = *ctx;
         ack_ctx.send_rel = false;
