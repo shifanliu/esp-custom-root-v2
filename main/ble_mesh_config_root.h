@@ -9,6 +9,8 @@
 #include "esp_ble_mesh_networking_api.h"
 #include "esp_ble_mesh_config_model_api.h"
 #include "esp_ble_mesh_rpr_model_api.h"
+#include <esp_ble_mesh_df_model_api.h>
+#include "esp_ble_mesh_local_data_operation_api.h"
 
 
 #include "mesh/adapter.h"
@@ -19,6 +21,37 @@
 
 #ifndef _BLE_ROOT_H_
 #define _BLE_ROOT_H_
+
+typedef struct {
+    uint16_t node_addr;
+    uint16_t path_origin;
+    uint16_t path_target;
+    uint16_t origin_dependents[10]; //TODO: The size of this should be tied to directed relay paths in config
+    uint16_t num_dependents_origin;
+    uint16_t target_dependents[10]; //TODO: The size of this should be tied to directed relay paths in config
+    uint16_t num_dependents_target;
+} __attribute__((packed)) df_path_t;
+
+typedef struct gps_data {
+    char     gps_time[32]; // Unix timestamp or seconds
+    int32_t  fixType;
+    int32_t  gnssFixOK;    // 0=unhealthy, 1=healthy
+    int32_t  diffSoln;
+    int32_t  numSV;        // number of satellites
+    int32_t  lat;          // 32-bit signed, scaled by 1e7 if needed
+    int32_t  lon;          // 32-bit signed, scaled by 1e7 if needed
+    uint8_t  button_state; // 0=not pressed, 1=pressed
+} __attribute__((packed)) gps_data_t;
+
+#define MAX_DF_ENTRIES 100
+extern df_path_t df_paths[MAX_DF_ENTRIES];
+extern int df_path_count;
+
+extern esp_ble_mesh_model_t *server_model;
+
+void printDfPaths();
+void get_node_forwarding_table(uint16_t node_addr);
+void get_all_forwarding_tables();
 
 /**
  * @brief Print Network Nodes in dev logs (esp log function)

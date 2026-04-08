@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <arpa/inet.h> // for host byte endianess <--> network byte endianess convert
 #include "esp_log.h"
+#include <inttypes.h>   // for PRId32 macros
 
 #define TAG_M "MAIN"
 #define TAG_ALL "*"
@@ -17,6 +18,7 @@
 #define CMD_BROADCAST_MSG "BCAST"
 #define CMD_RESET_ROOT "RST-R"
 #define CMD_CLEAN_NETWORK_CONFIG "CLEAN"
+#define CMD_GET_DF "GETDF"
 
 /***************** Event Handler *****************/
 // prov_complete_handler() get triger when a new node is provitioned to the network
@@ -52,13 +54,115 @@ static void config_complete_handler(uint16_t node_addr) {
     printNetworkInfo(); // esp log for debug
 }
 
-// recv_message_handler() get triger when module recived an message
+// recv_message_handler() get triger when module recived an message 
 static void recv_message_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, uint8_t *msg_ptr, uint32_t opcode) {
-    // ESP_LOGI(TAG_M, " ----------- recv_message handler trigered -----------");
-    uint16_t node_addr = ctx->addr;
-    ESP_LOGW(TAG_M, "-> Received Message \'%s\' from node-%d, opcode: [0x%06" PRIx32 "]", (char*)msg_ptr, node_addr, opcode);
+    // send ACK when receiving message from EDGE
+    {
+        ESP_LOGI(TAG_M, "[ROOT] Received message, preparing ACK...");
 
-    // recived a ble-message from edge ndoe
+        // send 0x01 as an ack
+        // uint8_t ack_payload[1] = {0x01};
+        uint8_t ack_payload[1];
+
+        if (ctx->recv_cred == ESP_BLE_MESH_DIRECTED_CRED) {
+            ack_payload[0] = 'D';   // Directed forwarding
+        } else {
+            ack_payload[0] = 'F';   // Flooding
+        }
+
+        esp_ble_mesh_msg_ctx_t ack_ctx = *ctx;
+        ack_ctx.send_rel = false;
+        ack_ctx.send_ttl = DEFAULT_MSG_SEND_TTL; 
+
+        ESP_LOGE(TAG_M, "ROOT ACK opcode = 0x%06" PRIx32, ECS_193_MODEL_OP_RESPONSE);
+
+        esp_err_t err = esp_ble_mesh_server_model_send_msg(
+            server_model,
+            &ack_ctx, 
+            ECS_193_MODEL_OP_RESPONSE,
+            sizeof(ack_payload),
+            ack_payload
+        );
+
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG_M, "[ROOT] ACK sent to Edge (addr=0x%04X)", ctx->addr);
+        } else {
+            ESP_LOGE(TAG_M, "[ROOT] Failed to send ACK: %s", esp_err_to_name(err));
+        }
+    }
+    
+    uint16_t node_addr = ctx->addr;
+    ESP_LOGW(TAG_M, "-> Received Message len=%d from node-%d, opcode: [0x%06" PRIx32 "]",
+             length, node_addr, opcode);
+    printNetworkInfo();
+    if(ctx->recv_cred == ESP_BLE_MESH_DIRECTED_CRED) {
+        ESP_LOGI(TAG_M, "Received via Directed");
+    } else {
+        ESP_LOGI(TAG_M, "Received via Flooding");
+    }
+
+    // check if message is GPS info
+    if (length == sizeof(gps_data_t)) {
+        gps_data_t *gps = (gps_data_t *)msg_ptr;
+
+        ESP_LOGI(TAG_M,
+            "[GPS] Node=%d Time=%s Lat=%" PRId32 " Lon=%" PRId32 
+            " fixType=%" PRId32 " gnssOK=%" PRId32 " diffSoln=%" PRId32
+            " SV=%" PRId32 " Btn=%d",
+            node_addr,
+            gps->gps_time,
+            gps->lat, gps->lon,
+            gps->fixType, gps->gnssFixOK, gps->diffSoln,
+            gps->numSV,
+            gps->button_state
+        );
+
+        // forward JSON to Python server
+        char json_buf[256];
+        int json_len = snprintf(json_buf, sizeof(json_buf),
+            "{\"node\":%d,"
+            "\"gps_time\":\"%s\","
+            "\"lat\":%" PRId32 ","
+            "\"lon\":%" PRId32 ","
+            "\"fixType\":%" PRId32 ","
+            "\"gnssFixOK\":%" PRId32 ","
+            "\"diffSoln\":%" PRId32 ","
+            "\"numSV\":%" PRId32 ","
+            "\"button\":%d}\n",
+            node_addr,
+            gps->gps_time,
+            gps->lat, gps->lon,
+            gps->fixType, gps->gnssFixOK, gps->diffSoln,
+            gps->numSV,
+            gps->button_state
+        );
+
+        uart_sendData(node_addr, (uint8_t *)json_buf, json_len);
+        return;
+    }
+
+    uint32_t cntrl_cmd;
+    memcpy(&cntrl_cmd, msg_ptr, 4);
+    uint32_t df_request_r = ECS_193_MODEL_OP_REQUEST_DFT_R;
+    
+    if(cntrl_cmd == df_request_r){
+        ESP_LOGI(TAG_M, "Received Request DFT R");
+        int recv_path_count = (length-4) / sizeof(df_path_t);
+        df_path_t dft_data[recv_path_count];
+
+        for(int i = 0; i < recv_path_count; i++){
+            df_path_t *df_path = (df_path_t*)(msg_ptr+4+i*sizeof(df_path_t));
+            memcpy(&df_paths[df_path_count + i], df_path, sizeof(df_path_t));
+            ESP_LOGI(TAG_M, "Stored Received Path: %d | Node: %d, Origin: %d, Target: %d",
+                     df_path_count + i, df_path->node_addr, df_path->path_origin, df_path->path_target);
+        }
+        int temp = sizeof(dft_data) / sizeof(df_path_t);
+        ESP_LOGI(TAG_M, "sizeof check: %d || msg_length: %d", temp, length);
+        df_path_count += recv_path_count;
+        return;
+    }
+
+    // recived a ble-message from edge node
     uart_sendData(node_addr, msg_ptr, length);
 
     // check if needs an response to confirm recived
@@ -70,17 +174,19 @@ static void recv_message_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, u
     // important retansmit test code -----------------------------------------------
     if (opcode == ECS_193_MODEL_OP_MESSAGE_I_0 || opcode == ECS_193_MODEL_OP_MESSAGE_I_1 || opcode == ECS_193_MODEL_OP_MESSAGE_I_2) {
         if (ctx->send_ttl <= DEFAULT_MSG_SEND_TTL) {
-            // only response to increased TTL message for testin
-            ESP_LOGE(TAG_M, "Ignoring Important message on first few transmission on purpose for testing, send_ttl:%d recv_ttl:%d",ctx->send_ttl, ctx->recv_ttl);
+            ESP_LOGE(TAG_M, "Ignoring Important message on first few transmission on purpose for testing, send_ttl:%d recv_ttl:%d",
+                     ctx->send_ttl, ctx->recv_ttl);
             return;
         }
 
-        ESP_LOGW(TAG_M, "---------- send_ttl:%d recv_ttl:%d default_ttl:%d",ctx->send_ttl,  ctx->recv_ttl, DEFAULT_MSG_SEND_TTL);
+        ESP_LOGW(TAG_M, "---------- send_ttl:%d recv_ttl:%d default_ttl:%d",
+                 ctx->send_ttl,  ctx->recv_ttl, DEFAULT_MSG_SEND_TTL);
         
         if ( ctx->recv_ttl <= DEFAULT_MSG_SEND_TTL) {
             return;
         }
-        ESP_LOGW(TAG_M, "====----- send_ttl:%d recv_ttl:%d default_ttl:%d",ctx->send_ttl,  ctx->recv_ttl, DEFAULT_MSG_SEND_TTL);
+        ESP_LOGW(TAG_M, "====----- send_ttl:%d recv_ttl:%d default_ttl:%d",
+                 ctx->send_ttl,  ctx->recv_ttl, DEFAULT_MSG_SEND_TTL);
     }
     // important retansmit test code -----------------------------------------------
 
@@ -88,7 +194,8 @@ static void recv_message_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, u
     char response[5] = "S";
     uint16_t response_length = strlen(response);
     send_response(ctx, response_length, (uint8_t *)response, opcode);
-    ESP_LOGW(TAG_M, "<- Sended Response %d bytes \'%*s\'", response_length, response_length, (char *)response);
+    ESP_LOGW(TAG_M, "<- Sended Response %d bytes \'%*s\'", response_length,
+             response_length, (char *)response);
 }
 
 // recv_response_handler() get triger when module recived an response to previouse sent message that requires an response
@@ -142,51 +249,100 @@ static void connectivity_handler(esp_ble_mesh_msg_ctx_t *ctx, uint16_t length, u
 }
 
 /***************** Other Functions *****************/
+
 static void send_network_info() {
     // craft bytes of network info and send to uart
     uint16_t node_count = esp_ble_mesh_provisioner_get_prov_node_count();
-    uint16_t node_left = node_count;
     const esp_ble_mesh_node_t **nodeTableEntry = esp_ble_mesh_provisioner_get_node_table_entry();
+
+    if (!nodeTableEntry || node_count == 0) {
+        ESP_LOGW(TAG_M, "No provisioned nodes to send.");
+        return;
+    }
 
     // 18 byte per node, send up to 40 node everytime
     uint8_t node_data_size = NODE_ADDR_LEN + NODE_UUID_LEN; // node_addr + node_uuid size
-    uint8_t buffer_size = OPCODE_LEN + 1 + 40 * node_data_size; // 3 byte opcode, 1 byte node amount, up to 40 node
+    uint8_t buffer_size = OPCODE_LEN + 1 + 40 * node_data_size; // 1 byte opcode, 1 byte count, node data
     uint8_t* buffer = (uint8_t*) malloc(buffer_size * sizeof(uint8_t));
+    if (!buffer) {
+        ESP_LOGE(TAG_M, "Memory allocation failed");
+        return;
+    }
 
-    buffer[0] = 0x01; //network info
+    buffer[0] = 0x01; // network info opcode
 
-    int node_index = 0;
-    while (node_left > 0)
-    {
-        const esp_ble_mesh_node_t *node_itr = nodeTableEntry[node_index];
-        // compute current ctach, max 40
-        uint8_t batch_size = (node_left < 40 ? node_left : 40);
+    int sent = 0;
+    while (sent < node_count) {
+        uint8_t* buffer_itr = buffer + OPCODE_LEN + 1;  // leave space for opcode and batch size
+        uint8_t batch_size = 0;
+
+        for (int i = 0; i < 40 && sent < node_count; ++sent) {
+            const esp_ble_mesh_node_t *node = nodeTableEntry[sent];
+            uint16_t node_addr = node->unicast_addr;
+
+            uint16_t node_addr_be = htons(node_addr);
+            memcpy(buffer_itr, &node_addr_be, NODE_ADDR_LEN);
+            buffer_itr += NODE_ADDR_LEN;
+            memcpy(buffer_itr, node->dev_uuid, NODE_UUID_LEN);
+            buffer_itr += NODE_UUID_LEN;
+            ++batch_size;
+            ++i;
+        }
+
+        if (batch_size > 0) {
+            buffer[1] = batch_size;  // write actual batch size after opcode
+            uart_sendData(0, buffer, buffer_itr - buffer);
+        }
+    }
+
+    free(buffer);
+}
+
+static void send_df_info() {
+    ESP_LOGI(TAG_M, "Sending Direct Forwarding Table Info");
+
+    uint8_t path_data_size = sizeof(uint16_t) * 2;
+    uint8_t max_paths_per_batch = 40;
+    uint8_t buffer_size = OPCODE_LEN + 1 + max_paths_per_batch * path_data_size;
+
+    if (df_path_count == 0) {
+        uint8_t empty_msg[2] = {0x04, 0x00};  // opcode + 0 paths
+        uart_sendData(0, empty_msg, sizeof(empty_msg));
+        return;
+    }
+
+    uint8_t* buffer = (uint8_t*) malloc(buffer_size);
+    if (buffer == NULL) {
+        ESP_LOGE(TAG_M, "Memory allocation failed");
+        return;
+    }
+
+    buffer[0] = 0x04;
+    int path_index = 0;
+    uint16_t paths_left = df_path_count;
+
+    while (paths_left > 0) {
+        uint8_t batch_size = (paths_left < max_paths_per_batch ? paths_left : max_paths_per_batch);
         uint8_t* buffer_itr = buffer + OPCODE_LEN;
 
-        // load batch size (1 byte node amount)
         *buffer_itr = batch_size;
         ++buffer_itr;
 
-        // load all node data in this batch
         for (int i = 0; i < batch_size; ++i) {
-            // load current node
-            uint16_t node_addr = node_itr->unicast_addr;
-            uint16_t node_addr_network_endian = htons(node_addr);
-
-            memcpy(buffer_itr, &node_addr_network_endian, NODE_ADDR_LEN);
-            buffer_itr += NODE_ADDR_LEN;
-            memcpy(buffer_itr, node_itr->dev_uuid, NODE_UUID_LEN);
-            buffer_itr += NODE_UUID_LEN;
-
-            // move to next node
-            node_index += 1;
+            uint16_t origin_be = htons(df_paths[path_index].path_origin);
+            uint16_t target_be = htons(df_paths[path_index].path_target);
+            memcpy(buffer_itr, &origin_be, 2); buffer_itr += 2;
+            memcpy(buffer_itr, &target_be, 2); buffer_itr += 2;
+            ++path_index;
         }
 
-        uart_sendData(0, buffer, buffer_itr-buffer);
-        node_left -= batch_size;
+        uart_sendData(0, buffer, buffer_itr - buffer);
+        paths_left -= batch_size;
     }
+
     free(buffer);
 }
+
 
 static void execute_uart_command(char* command, size_t cmd_total_len) {
     ESP_LOGI(TAG_M, "execute_command called");
@@ -210,10 +366,16 @@ static void execute_uart_command(char* command, size_t cmd_total_len) {
     }
 
     // ====== core commands ====== 
+    if (strncmp(command, CMD_GET_DF, CMD_LEN) == 0) {
+        ESP_LOGI(TAG_E, "executing \'GETDF\'");
+        send_df_info();
+    } 
+    
     if (strncmp(command, CMD_GET_NET_INFO, CMD_LEN) == 0) {
         send_network_info();
     } 
-    else if (strncmp(command, CMD_SEND_MSG, CMD_LEN) == 0) {
+    
+    if (strncmp(command, CMD_SEND_MSG, CMD_LEN) == 0) {
         ESP_LOGI(TAG_E, "executing \'SEND-\'");
         char *address_start = command + CMD_LEN;
         char *msg_start = address_start + NODE_ADDR_LEN;
@@ -239,24 +401,23 @@ static void execute_uart_command(char* command, size_t cmd_total_len) {
         send_message(node_addr, msg_length, (uint8_t *) msg_start, false);
         ESP_LOGW(TAG_M, "<- Sended Message [%s]", (char *)msg_start);
     } 
-    else if (strncmp(command, CMD_BROADCAST_MSG, CMD_LEN) == 0) {
+    if (strncmp(command, CMD_BROADCAST_MSG, CMD_LEN) == 0) {
         ESP_LOGI(TAG_E, "executing \'BCAST\'");
         char *msg_start = command + CMD_LEN + NODE_ADDR_LEN;
         size_t msg_length = cmd_total_len - CMD_LEN - NODE_ADDR_LEN;
 
         broadcast_message(msg_length, (uint8_t *)msg_start);
     }
-    else if (strncmp(command, CMD_RESET_ROOT, 5) == 0) {
+    if (strncmp(command, CMD_RESET_ROOT, 5) == 0) {
         ESP_LOGI(TAG_E, "executing \'RST-R\'");
         esp_restart();
     }
-    else if (strncmp(command, CMD_CLEAN_NETWORK_CONFIG, 5) == 0)
+    if (strncmp(command, CMD_CLEAN_NETWORK_CONFIG, 5) == 0)
     {
         ESP_LOGI(TAG_E, "executing \'CLEAN\'");
         uart_sendMsg(0, " - Reseting Root Module\n");
         reset_esp32();
     }
-
     // ====== other dev/debug use command ====== 
     // else if (strncmp(command, "ECHO-", 5) == 0) {
     //     // echo test
@@ -356,4 +517,5 @@ void app_main(void)
     memcpy(message_byte + 1, message, strlen(message));
     uart_sendData(0, message_byte, strlen(message) + 1);
     printNetworkInfo(); // esp log for debug
+    //printDfPaths();
 }

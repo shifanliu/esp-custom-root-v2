@@ -57,10 +57,7 @@ static void button_tap_cb(void* arg)
     //     control = 1;
     // }else 
     if (control == 1) {
-        char msg[20] = "TI0";
-        uint16_t msg_length = strlen(msg);
-        send_message(node_addr, msg_length, (uint8_t *)msg, false);
-        uart_sendMsg(node_addr, "[Test] Sended Init to Node-6\n");
+        get_all_forwarding_tables();
         // control = 2;
     }
     //  else {

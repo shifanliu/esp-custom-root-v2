@@ -11,7 +11,11 @@
 #define TAG TAG_ROOT
 #define TAG_W "Debug"
 #define TAG_INFO "Net_Info"
+#define WHITELIST_TEST_MODE false
+static bool whitelist_provisioned = false;
 
+int df_path_count = 0;
+df_path_t df_paths[MAX_DF_ENTRIES];
 
 static bool provision_enable = true;
 static uint8_t** important_message_data_list = NULL;
@@ -75,6 +79,37 @@ static esp_ble_mesh_cfg_srv_t config_server = {
     .relay_retransmit = ESP_BLE_MESH_TRANSMIT(2, 20),
 };
 
+#if CONFIG_BLE_MESH_DF_CLI
+    static esp_ble_mesh_client_t df_client;
+#endif
+
+#if CONFIG_BLE_MESH_DF_SRV
+static esp_ble_mesh_df_srv_t directed_forwarding_server = {
+    .directed_net_transmit = ESP_BLE_MESH_TRANSMIT(1, 100),
+    .directed_relay_retransmit = ESP_BLE_MESH_TRANSMIT(2, 100),
+    .default_rssi_threshold = (-90),
+    .rssi_margin = 1,
+    .directed_node_paths = 100,
+    .directed_relay_paths = 100,
+#if defined(CONFIG_BLE_MESH_GATT_PROXY_SERVER)
+    .directed_proxy_paths = 20,
+#else
+    .directed_proxy_paths = 0,
+#endif
+#if defined(CONFIG_BLE_MESH_FRIEND)
+    .directed_friend_paths = 20,
+#else
+    .directed_friend_paths = 0,
+#endif
+    .path_monitor_interval = 120,
+    .path_disc_retry_interval = 300,
+    .path_disc_interval = ESP_BLE_MESH_PATH_DISC_INTERVAL_30_SEC,
+    .lane_disc_guard_interval = ESP_BLE_MESH_LANE_DISC_GUARD_INTERVAL_10_SEC,
+    .directed_ctl_net_transmit = ESP_BLE_MESH_TRANSMIT(1, 100),
+    .directed_ctl_relay_retransmit = ESP_BLE_MESH_TRANSMIT(2, 100),
+};
+#endif
+
 #if CONFIG_BLE_MESH_RPR_CLI
 static esp_ble_mesh_client_t remote_prov_client;
 #endif
@@ -83,6 +118,12 @@ static esp_ble_mesh_client_t config_client;
 static esp_ble_mesh_model_t root_models[] = {
     ESP_BLE_MESH_MODEL_CFG_SRV(&config_server),
     ESP_BLE_MESH_MODEL_CFG_CLI(&config_client),
+#if CONFIG_BLE_MESH_DF_CLI
+    ESP_BLE_MESH_MODEL_DF_CLI(&df_client),
+#endif
+#if CONFIG_BLE_MESH_DF_SRV
+    ESP_BLE_MESH_MODEL_DF_SRV(&directed_forwarding_server),
+#endif
 #if CONFIG_BLE_MESH_RPR_CLI
     ESP_BLE_MESH_MODEL_RPR_CLI(&remote_prov_client),
 #endif
@@ -130,7 +171,8 @@ static esp_ble_mesh_model_t vnd_models[] = { // custom models
 };
 
 static esp_ble_mesh_model_t *client_model = &vnd_models[0];
-static esp_ble_mesh_model_t *server_model = &vnd_models[1];
+esp_ble_mesh_model_t *server_model = &vnd_models[1];
+// static esp_ble_mesh_model_t *server_model = &vnd_models[1];
 
 static esp_ble_mesh_elem_t elements[] = {
     ESP_BLE_MESH_ELEMENT(0, root_models, vnd_models),
@@ -357,6 +399,44 @@ void example_ble_mesh_send_remote_provisioning_scan_start(void)
     cur_rpr_cli_opcode = ESP_BLE_MESH_MODEL_OP_RPR_SCAN_GET;
 }
 
+void example_ble_mesh_send_directed_forwarding_srv_control_set(esp_ble_mesh_node_info_t *node)
+{
+    esp_ble_mesh_df_client_set_t set = {0};
+    esp_ble_mesh_client_common_param_t param = {0};
+    esp_ble_mesh_elem_t *element = NULL;
+    esp_ble_mesh_model_t *model = NULL;
+    esp_err_t err = ESP_OK;
+
+    element = esp_ble_mesh_find_element(esp_ble_mesh_get_primary_element_address());
+    if (!element) {
+        ESP_LOGE(TAG, "Element 0x%04x not exists", esp_ble_mesh_get_primary_element_address());
+        return;
+    }
+
+    model = esp_ble_mesh_find_sig_model(element, ESP_BLE_MESH_MODEL_ID_DF_CLI);
+    if (!model) {
+        ESP_LOGE(TAG, "Directed Forwarding Client not exists");
+        return;
+    }
+
+    ble_mesh_set_msg_common(&param, node->unicast, model, ESP_BLE_MESH_MODEL_OP_DIRECTED_CONTROL_SET);
+
+    set.directed_control_set.net_idx = ble_mesh_key.net_idx;
+    set.directed_control_set.directed_forwarding = ESP_BLE_MESH_DIRECTED_FORWARDING_ENABLED;
+    set.directed_control_set.directed_relay = ESP_BLE_MESH_DIRECTED_RELAY_ENABLED;
+    set.directed_control_set.directed_proxy = ESP_BLE_MESH_DIRECTED_PROXY_IGNORE;
+    set.directed_control_set.directed_proxy_use_default = ESP_BLE_MESH_DIRECTED_PROXY_USE_DEFAULT_IGNORE;
+    set.directed_control_set.directed_friend = ESP_BLE_MESH_DIRECTED_FRIEND_IGNORE;
+
+
+    err = esp_ble_mesh_df_client_set_state(&param, &set);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to send Directed Forwarding Control Set");
+    }
+
+    return;
+}
+
 static esp_err_t prov_complete(uint16_t node_index, const esp_ble_mesh_octet16_t uuid, uint16_t primary_addr, uint8_t element_num, uint16_t net_idx)
 {
     // Root Module only, intiate configuration of edge node
@@ -400,6 +480,10 @@ static esp_err_t prov_complete(uint16_t node_index, const esp_ble_mesh_octet16_t
         return ESP_FAIL;
     }
 
+    example_ble_mesh_send_directed_forwarding_srv_control_set(&nodes[node_index]);
+
+    
+
     // application level callback, let main() know provision is completed
     prov_complete_handler_cb(node_index, uuid, primary_addr, element_num, net_idx);  //==================== app level callback
 
@@ -434,6 +518,305 @@ static void recv_unprov_adv_pkt(uint8_t dev_uuid[ESP_BLE_MESH_OCTET16_LEN], uint
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start provisioning device");
     }
+}
+
+void get_all_forwarding_tables() {
+    for(int i = 0; i < ARRAY_SIZE(nodes); i++) {
+        if(nodes[i].unicast != ESP_BLE_MESH_ADDR_UNASSIGNED){
+            get_node_forwarding_table(nodes[i].unicast);
+        }
+    }
+}
+
+void get_node_forwarding_table(uint16_t node_addr) {
+    esp_ble_mesh_client_common_param_t param = {0};
+    esp_ble_mesh_df_client_get_t get = {0};
+    esp_ble_mesh_elem_t *element = NULL;
+    esp_ble_mesh_model_t *model = NULL;
+    esp_err_t err = ESP_OK;
+
+    // Find the Directed Forwarding Client model
+    element = esp_ble_mesh_find_element(esp_ble_mesh_get_primary_element_address());
+    if (!element) {
+        ESP_LOGE(TAG, "Element 0x%04x not exists", esp_ble_mesh_get_primary_element_address());
+        return;
+    }
+
+    model = esp_ble_mesh_find_sig_model(element, ESP_BLE_MESH_MODEL_ID_DF_CLI);
+    if (!model) {
+        ESP_LOGE(TAG, "Directed Forwarding Client not exists");
+        return;
+    }
+
+    // Set up common parameters
+    ble_mesh_set_msg_common(&param, node_addr, model, ESP_BLE_MESH_MODEL_OP_FORWARDING_TABLE_ENTRIES_CNT_GET);
+
+    // Set up specific parameters for the get operation
+    get.forwarding_table_entries_cnt_get.net_idx = ble_mesh_key.net_idx;
+
+    // Send the request
+    err = esp_ble_mesh_df_client_get_state(&param, &get);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to send Forwarding Table Entries Count Get, err %d", err);
+        return;
+    }
+
+    // The response will be handled in the DF client callback
+    ESP_LOGI(TAG, "Sent Forwarding Table Entries Count Get to 0x%04x", node_addr);
+}
+
+void get_node_forwarding_table_entries(uint16_t node_addr) {
+    esp_ble_mesh_client_common_param_t param = {0};
+    esp_ble_mesh_df_client_get_t get = {0};
+    esp_ble_mesh_elem_t *element = NULL;
+    esp_ble_mesh_model_t *model = NULL;
+    esp_err_t err = ESP_OK;
+
+    // Find the Directed Forwarding Client model
+    element = esp_ble_mesh_find_element(esp_ble_mesh_get_primary_element_address());
+    if (!element) {
+        ESP_LOGE(TAG, "Element 0x%04x not exists", esp_ble_mesh_get_primary_element_address());
+        return;
+    }
+
+    model = esp_ble_mesh_find_sig_model(element, ESP_BLE_MESH_MODEL_ID_DF_CLI);
+    if (!model) {
+        ESP_LOGE(TAG, "Directed Forwarding Client not exists");
+        return;
+    }
+
+    // Set up common parameters
+    ble_mesh_set_msg_common(&param, node_addr, model, ESP_BLE_MESH_MODEL_OP_FORWARDING_TABLE_ENTRIES_GET);
+
+    // Set up specific parameters for the get operation
+    get.forwarding_table_entries_get.net_idx = ble_mesh_key.net_idx;
+    get.forwarding_table_entries_get.filter_mask = ESP_BLE_MESH_GET_FILTER_MASK(0, 1, 0, 0); // Get both fixed and non-fixed paths
+    get.forwarding_table_entries_get.start_index = 0; // Start from the beginning
+    get.forwarding_table_entries_get.path_origin = 0; // 0 means get all paths
+    get.forwarding_table_entries_get.dst = 0; // 0 means get all destinations
+    get.forwarding_table_entries_get.include_id = false; // Don't include update ID
+
+    // Send the request
+    err = esp_ble_mesh_df_client_get_state(&param, &get);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to send Forwarding Table Entries Get, err %d", err);
+        return;
+    }
+
+    // The response will be handled in the DF client callback
+    ESP_LOGI(TAG, "Sent Forwarding Table Entries Get to 0x%04x", node_addr);
+}
+
+static void ble_mesh_df_client_cb(esp_ble_mesh_df_client_cb_event_t event,
+                                  esp_ble_mesh_df_client_cb_param_t *param)
+{
+    if(event != ESP_BLE_MESH_DF_CLIENT_SEND_COMP_EVT) {
+        ESP_LOGW(TAG, "Directed Forwarding Client Callback");
+    }
+    
+    switch (event)
+    {
+    case ESP_BLE_MESH_DF_CLIENT_RECV_SET_RSP_EVT:
+        ESP_LOGW(TAG, "Directed Forwarding Set");
+        switch (param->params->opcode)
+        {
+        case ESP_BLE_MESH_MODEL_OP_DIRECTED_CONTROL_SET:
+            if (param->recv.directed_control_status.status == 0x00)
+            {
+                ESP_LOGI(TAG, "Enable Directed Forwarding state success");
+                //TODO: Try initial response message to establish path
+            }
+            else
+            {
+                ESP_LOGI(TAG, "Enable Directed Forwarding state fail");
+            }
+            break;
+        }
+        break;
+    case ESP_BLE_MESH_DF_CLIENT_SEND_TIMEOUT_EVT:
+        ESP_LOGI(TAG, "Directed Forwarding Timeout");
+        esp_ble_mesh_node_info_t node = {.unicast = param->params->ctx.addr};
+        example_ble_mesh_send_directed_forwarding_srv_control_set(&node);
+        break;
+    case ESP_BLE_MESH_DF_CLIENT_RECV_GET_RSP_EVT:
+        switch (param->params->opcode)
+        {
+        case ESP_BLE_MESH_MODEL_OP_FORWARDING_TABLE_ENTRIES_CNT_GET:
+            ESP_LOGI(TAG, "Received Forwarding Table Entries Count Status from 0x%04x", param->params->ctx.addr);
+            ESP_LOGI(TAG, "Status: 0x%02x", param->recv.forwarding_table_entries_cnt_status.status);
+            ESP_LOGI(TAG, "Fixed Entry Count: %d", param->recv.forwarding_table_entries_cnt_status.fixed_entry_cnt);
+            ESP_LOGI(TAG, "Non-Fixed Entry Count: %d", param->recv.forwarding_table_entries_cnt_status.non_fixed_entry_cnt);
+            ESP_LOGI(TAG, "Update ID: 0x%04x", param->recv.forwarding_table_entries_cnt_status.update_id);
+            
+            // If we have entries, request them
+            if (param->recv.forwarding_table_entries_cnt_status.fixed_entry_cnt > 0 || 
+                param->recv.forwarding_table_entries_cnt_status.non_fixed_entry_cnt > 0) {
+                get_node_forwarding_table_entries(param->params->ctx.addr);
+            }
+            break;
+            
+        case ESP_BLE_MESH_MODEL_OP_FORWARDING_TABLE_ENTRIES_GET:
+            ESP_LOGI(TAG, "Received Forwarding Table Entries Status from 0x%04x", param->params->ctx.addr);
+            ESP_LOGI(TAG, "Status: 0x%02x", param->recv.forwarding_table_entries_status.status);
+            ESP_LOGI(TAG, "Filter Mask: 0x%01x", param->recv.forwarding_table_entries_status.filter_mask);
+            ESP_LOGI(TAG, "Start Index: %d", param->recv.forwarding_table_entries_status.start_index);
+            ESP_LOGI(TAG, "Entry List Size: %d", param->recv.forwarding_table_entries_status.entry_list_size);
+            
+            // Process each entry
+            for (int i = 0; i < param->recv.forwarding_table_entries_status.entry_list_size; i++) {
+                esp_ble_mesh_forwarding_table_entry_t *entry = &param->recv.forwarding_table_entries_status.entry_list[i];
+                
+                ESP_LOGI(TAG, "Entry %d:", i);
+                ESP_LOGI(TAG, "  Fixed Path: %s", entry->fixed_path_flag ? "Yes" : "No");
+                ESP_LOGI(TAG, "  Path Origin: 0x%04x", entry->path_origin.range_start);
+                if(entry->bearer_twd_path_origin_ind){
+                    ESP_LOGI(TAG, "  Index towards origin: %d", entry->bearer_twd_path_origin);
+                }
+                
+                
+                if (entry->unicast_dst_flag) {
+                    ESP_LOGI(TAG, "  Path Target: 0x%04x", entry->path_target.range_start);
+                } else {
+                    ESP_LOGI(TAG, "  Multicast Destination: 0x%04x", entry->multicast_dst);
+                }
+                if(entry->bearer_twd_path_target_ind){
+                    ESP_LOGI(TAG, "  Index towards target: %d", entry->bearer_twd_path_target);
+                }
+                
+                if (!entry->fixed_path_flag) {
+                    ESP_LOGI(TAG, "  Lane Counter: %d", entry->lane_counter);
+                    ESP_LOGI(TAG, "  Path Remaining Time: %d", entry->path_remaining_time);
+                    ESP_LOGI(TAG, "  Path Origin Forward Number: %d", entry->path_origin_forward_number);
+                }
+                
+                // You can use this information to build your network topology
+                // For example, update your graph with this path information
+                // update_network_graph(entry->path_origin.range_start, 
+                //                     entry->unicast_dst_flag ? entry->path_target.range_start : entry->multicast_dst);
+            }
+            
+            // If there are more entries, request the next batch
+            if (param->recv.forwarding_table_entries_status.entry_list_size > 0) {
+                // Request next batch starting from the last index + entry count
+                //get_next_forwarding_table_entries(param->params->ctx.addr, 
+                //                                     param->recv.forwarding_table_entries_status.start_index + 
+                //                                     param->recv.forwarding_table_entries_status.entry_list_size);
+            }
+            break;
+        }
+        break;
+    default:
+        if(event != ESP_BLE_MESH_DF_CLIENT_SEND_COMP_EVT) {
+            ESP_LOGE(TAG, "Directed Forwarding Client Callback Error. Opcode: 0x%04x, Event: %d", (uint)param->params->opcode, event);
+        }
+        break;
+    }
+}
+
+void get_next_forwarding_table_entries(uint16_t node_addr, uint16_t start_index) {
+    esp_ble_mesh_client_common_param_t param = {0};
+    esp_ble_mesh_df_client_get_t get = {0};
+    esp_ble_mesh_elem_t *element = NULL;
+    esp_ble_mesh_model_t *model = NULL;
+    esp_err_t err = ESP_OK;
+
+    element = esp_ble_mesh_find_element(esp_ble_mesh_get_primary_element_address());
+    if (!element) return;
+
+    model = esp_ble_mesh_find_sig_model(element, ESP_BLE_MESH_MODEL_ID_DF_CLI);
+    if (!model) return;
+
+    ble_mesh_set_msg_common(&param, node_addr, model, ESP_BLE_MESH_MODEL_OP_FORWARDING_TABLE_ENTRIES_GET);
+
+    get.forwarding_table_entries_get.net_idx = ble_mesh_key.net_idx;
+    get.forwarding_table_entries_get.filter_mask = ESP_BLE_MESH_GET_FILTER_MASK(1, 1, 0, 0);
+    get.forwarding_table_entries_get.start_index = start_index;
+    get.forwarding_table_entries_get.path_origin = 0;
+    get.forwarding_table_entries_get.dst = 0;
+    get.forwarding_table_entries_get.include_id = false;
+
+    err = esp_ble_mesh_df_client_get_state(&param, &get);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to send next Forwarding Table Entries Get, err %d", err);
+    }
+}
+
+void printDfPaths() {
+    ESP_LOGW(TAG, "----------- Direct Forwarding Paths --------------");
+    ESP_LOGI(TAG, "Number of paths: %d", df_path_count);
+    for (int i = 0; i < df_path_count; i++) {
+        ESP_LOGI(TAG, "Path %d: Node = 0x%04x Origin = 0x%04x, Target = 0x%04x", i, df_paths[i].node_addr, df_paths[i].path_origin, df_paths[i].path_target);
+        ESP_LOGI(TAG, "Origin Dependents (%d):", df_paths[i].num_dependents_origin);
+        for(int j = 0; j < df_paths[i].num_dependents_origin; j++) {
+            ESP_LOGI(TAG, "0x%04x", df_paths[i].origin_dependents[j]);
+        }
+        ESP_LOGI(TAG, "Target Dependents (%d):", df_paths[i].num_dependents_target);
+        for(int j = 0; j < df_paths[i].num_dependents_target; j++) {
+            ESP_LOGI(TAG, "0x%04x", df_paths[i].target_dependents[j]);
+        }
+    }
+    ESP_LOGW(TAG, "----------- End of Direct Forwarding Paths --------------");
+}
+
+static void ble_mesh_df_server_cb(esp_ble_mesh_df_server_cb_event_t event,
+                                                           esp_ble_mesh_df_server_cb_param_t *param)
+{
+    esp_ble_mesh_df_server_table_change_t change = {0};
+    esp_ble_mesh_uar_t path_origin;
+    esp_ble_mesh_uar_t path_target;
+
+    if (event == ESP_BLE_MESH_DF_SERVER_TABLE_CHANGE_EVT)
+    {
+        memcpy(&change, &param->value.table_change, sizeof(esp_ble_mesh_df_server_table_change_t));
+
+        switch (change.action)
+        {
+        case ESP_BLE_MESH_DF_TABLE_ADD:
+        {
+            memcpy(&path_origin, &change.df_table_info.df_table_entry_add_remove.path_origin, sizeof(path_origin));
+            memcpy(&path_target, &change.df_table_info.df_table_entry_add_remove.path_target, sizeof(path_target));
+            ESP_LOGI(TAG, "Established a path from 0x%04x to 0x%04x", path_origin.range_start, path_target.range_start);
+
+            if (df_path_count < MAX_DF_ENTRIES) {
+                df_paths[df_path_count].node_addr = esp_ble_mesh_get_primary_element_address();
+                df_paths[df_path_count].path_origin = path_origin.range_start;
+                df_paths[df_path_count].path_target = path_target.range_start;
+                memcpy(&df_paths[df_path_count].origin_dependents, &change.df_table_info.df_table_entry_add_remove.dep_origin_data, sizeof(esp_ble_mesh_uar_t) * change.df_table_info.df_table_entry_add_remove.dep_origin_num);
+                df_paths[df_path_count].num_dependents_origin = change.df_table_info.df_table_entry_add_remove.dep_origin_num;
+                memcpy(&df_paths[df_path_count].target_dependents, &change.df_table_info.df_table_entry_add_remove.dep_target_data, sizeof(esp_ble_mesh_uar_t) * change.df_table_info.df_table_entry_add_remove.dep_target_num);
+                df_paths[df_path_count].num_dependents_target = change.df_table_info.df_table_entry_add_remove.dep_target_num;
+                df_path_count++;
+                ESP_LOGI(TAG, "Stored DF Path: 0x%04x -> 0x%04x", path_origin.range_start, path_target.range_start);
+            } else {
+                ESP_LOGW(TAG, "DF Table is full! Cannot store more paths.");
+            }
+            break;
+        }
+        break;
+        case ESP_BLE_MESH_DF_TABLE_REMOVE:
+        {
+            memcpy(&path_origin, &change.df_table_info.df_table_entry_add_remove.path_origin, sizeof(path_origin));
+            memcpy(&path_target, &change.df_table_info.df_table_entry_add_remove.path_target, sizeof(path_target));
+            ESP_LOGI(TAG, "Remove a path from 0x%04x to 0x%04x", path_origin.range_start, path_target.range_start);
+
+            for (int i = 0; i < df_path_count; i++) {
+                if (df_paths[i].path_origin == path_origin.range_start && df_paths[i].path_target == path_target.range_start) {
+                    // Shift remaining paths to fill the gap
+                    for (int j = i; j < df_path_count - 1; j++) {
+                        df_paths[j] = df_paths[j + 1];
+                    }
+                    df_path_count--;
+                    break;
+                }
+            }
+        }
+        break;
+        default:
+            ESP_LOGW(TAG, "Unknown action %d", change.action);
+        }
+    }
+
+    return;
 }
 
 static void ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event, esp_ble_mesh_prov_cb_param_t *param)
@@ -549,7 +932,7 @@ static void example_ble_mesh_remote_prov_client_callback(esp_ble_mesh_rpr_client
             {
             case ESP_BLE_MESH_MODEL_OP_RPR_SCAN_GET:
             {
-                if (param->recv.val.scan_status.status == ESP_BLE_MESH_RPR_STATUS_SUCCESS)
+                if (param->recv.val.scan_status.status == 0x00)
                 {
                     switch (param->recv.val.scan_status.rpr_scanning)
                     {
@@ -848,6 +1231,73 @@ static esp_err_t config_complete(esp_ble_mesh_msg_ctx_t ctx) {
     return ESP_OK;
 }
 
+static esp_err_t custom_model_bind_appkey(uint16_t app_idx) {
+    const esp_ble_mesh_comp_t *comp = NULL;
+    esp_ble_mesh_elem_t *element = NULL;
+    esp_ble_mesh_model_t *model = NULL;
+    int i, j, k;
+
+    comp = &composition;
+    if (!comp) {
+        return ESP_FAIL;
+    }
+
+    for (i = 0; i < comp->element_count; i++) {
+        element = &comp->elements[i];
+        /* Bind app_idx with SIG models except the Config Client & Server models */
+        for (j = 0; j < element->sig_model_count; j++) {
+            model = &element->sig_models[j];
+            if (model->model_id == ESP_BLE_MESH_MODEL_ID_CONFIG_SRV ||
+                    model->model_id == ESP_BLE_MESH_MODEL_ID_CONFIG_CLI) {
+                continue;
+            }
+            for (k = 0; k < ARRAY_SIZE(model->keys); k++) {
+                if (model->keys[k] == app_idx) {
+                    break;
+                }
+            }
+            if (k != ARRAY_SIZE(model->keys)) {
+                continue;
+            }
+            for (k = 0; k < ARRAY_SIZE(model->keys); k++) {
+                if (model->keys[k] == ESP_BLE_MESH_KEY_UNUSED) {
+                    model->keys[k] = app_idx;
+                    break;
+                }
+            }
+            if (k == ARRAY_SIZE(model->keys)) {
+                ESP_LOGE(TAG, "%s: SIG model (model_id 0x%04x) is full of AppKey",
+                         __func__, model->model_id);
+            }
+        }
+        /* Bind app_idx with Vendor models */
+        for (j = 0; j < element->vnd_model_count; j++) {
+            model = &element->vnd_models[j];
+            for (k = 0; k < ARRAY_SIZE(model->keys); k++) {
+                if (model->keys[k] == app_idx) {
+                    break;
+                }
+            }
+            if (k != ARRAY_SIZE(model->keys)) {
+                continue;
+            }
+            for (k = 0; k < ARRAY_SIZE(model->keys); k++) {
+                if (model->keys[k] == ESP_BLE_MESH_KEY_UNUSED) {
+                    model->keys[k] = app_idx;
+                    break;
+                }
+            }
+            if (k == ARRAY_SIZE(model->keys)) {
+                ESP_LOGE(TAG, "%s: Vendor model (model_id 0x%04x, cid: 0x%04x) is full of AppKey",
+                         __func__, model->vnd.model_id, model->vnd.company_id);
+            }
+        }
+    }
+
+    return ESP_OK;
+    // return example_set_app_idx_to_user_data(app_idx);
+}
+
 static void example_ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event, esp_ble_mesh_cfg_client_cb_param_t *param)
 {
     esp_ble_mesh_client_common_param_t common = {0};
@@ -967,6 +1417,14 @@ static void ble_mesh_custom_model_cb(esp_ble_mesh_model_cb_event_t event, esp_bl
 {
     // static int64_t start_time;
 
+    if(WHITELIST_TEST_MODE){
+        uint16_t wl_addr = 0x0005;
+        if(param->model_operation.ctx->addr > wl_addr){
+            ESP_LOGW(TAG, "DROPPING NON-WHITLISTED MESSAGE - addr: %04x", param->model_operation.ctx->addr);
+            return;
+        }
+    }
+
     switch (event) {
     case ESP_BLE_MESH_MODEL_OPERATION_EVT:
         switch (param->model_operation.opcode) {
@@ -1048,6 +1506,7 @@ void send_message(uint16_t dst_address, uint16_t length, uint8_t *data_ptr, bool
     ctx.app_idx = ble_mesh_key.app_idx;
     ctx.addr = dst_address;
     ctx.send_ttl = ble_message_ttl;
+    ctx.send_tag |= ESP_BLE_MESH_TAG_USE_DIRECTED; 
 
     if (require_response)
     {
@@ -1191,6 +1650,7 @@ void broadcast_message(uint16_t length, uint8_t *data_ptr)
     ctx.app_idx = ble_mesh_key.app_idx;
     ctx.addr = 0xFFFF;
     ctx.send_ttl = ble_message_ttl;
+    ctx.send_tag |= ESP_BLE_MESH_TAG_USE_DIRECTED;
     
 
     err = esp_ble_mesh_client_model_send_msg(client_model, &ctx, opcode, length, data_ptr, MSG_TIMEOUT, false, message_role);
@@ -1254,6 +1714,8 @@ static esp_err_t ble_mesh_init(void)
     esp_ble_mesh_register_prov_callback(ble_mesh_provisioning_cb);
     esp_ble_mesh_register_custom_model_callback(ble_mesh_custom_model_cb);
     esp_ble_mesh_register_rpr_client_callback(example_ble_mesh_remote_prov_client_callback);
+    esp_ble_mesh_register_df_client_callback(ble_mesh_df_client_cb);
+    esp_ble_mesh_register_df_server_callback(ble_mesh_df_server_cb);
 
     err = esp_ble_mesh_init(&provision, &composition);
     if (err != ESP_OK) {
@@ -1282,6 +1744,12 @@ static esp_err_t ble_mesh_init(void)
     err = esp_ble_mesh_provisioner_add_local_app_key(ble_mesh_key.app_key, ble_mesh_key.net_idx, ble_mesh_key.app_idx);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to add local AppKey");
+        return err;
+    }
+
+    err = esp_ble_mesh_enable_directed_forwarding(ESP_BLE_MESH_KEY_PRIMARY, ESP_BLE_MESH_DIRECTED_FORWARDING_ENABLED, ESP_BLE_MESH_DIRECTED_RELAY_ENABLED);     /* Enable Directed Forwarding on self */
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to enable directed forwarding(err %d)", err);
         return err;
     }
 
@@ -1380,6 +1848,9 @@ esp_err_t esp_module_root_init(
         ESP_LOGE(TAG, "esp32_bluetooth_init failed (err %d)", err);
         return ESP_FAIL;
     }
+
+    ESP_LOGI(TAG, "Binding AppKey 0x0000 to root vendor models");
+    custom_model_bind_appkey(APP_KEY_IDX);
 
     // /* Open nvs namespace for storing/restoring mesh example info */
     // err = ble_mesh_nvs_open(&NVS_HANDLE);
